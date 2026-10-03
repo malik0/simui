@@ -53,14 +53,23 @@
       #back:hover { transform: translateX(-2px); background: linear-gradient(180deg, rgba(255, 255, 255, 0.32), rgba(255, 255, 255, 0.14)); }
       #back[hidden] { display: none; }
       /* theme switcher: a glass segmented control, top right */
-      #themes { right: 18px; top: 14px; pointer-events: auto; display: flex; gap: 2px; padding: 4px; }
-      #themes button {
+      #themes, #modes { pointer-events: auto; display: flex; align-items: center; gap: 2px; padding: 4px; }
+      #themes { right: 18px; top: 14px; }
+      /* reading mode: only present while a note is open */
+      #modes {
+        left: 50%; top: 14px; transform: translateX(-50%) translateY(-8px);
+        opacity: 0; visibility: hidden; transition: opacity 0.35s ease, transform 0.35s ease, visibility 0.35s;
+      }
+      #modes.show { opacity: 1; visibility: visible; transform: translateX(-50%); }
+      #pageno { font-size: 12.5px; font-weight: 600; opacity: 0.75; padding: 0 12px 0 8px; display: none; font-variant-numeric: tabular-nums; }
+      #modes[data-mode="page"] #pageno:not(:empty) { display: inline; }
+      #themes button, #modes button {
         font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; border: 0; border-radius: 999px;
         padding: 6px 14px; color: inherit; background: transparent; opacity: 0.7;
         transition: background 0.25s ease, opacity 0.25s ease, transform 0.15s ease;
       }
-      #themes button:hover { opacity: 1; transform: translateY(-1px); }
-      #themes button.on { opacity: 1; background: var(--tint, rgba(70, 90, 210, 0.35)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35); }
+      #themes button:hover, #modes button:hover { opacity: 1; transform: translateY(-1px); }
+      #themes button.on, #modes button.on { opacity: 1; background: var(--tint, rgba(70, 90, 210, 0.35)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35); }
       #hud {
         left: 50%; bottom: 18px; transform: translateX(-50%);
         font-size: 12.5px; font-weight: 500; white-space: nowrap; color: rgba(255, 255, 255, 0.78);
@@ -73,6 +82,7 @@
     <div id="crumb" class="glass">Knowledge Space</div>
     <button id="back" class="glass" hidden>&#8249; Back to page</button>
     <div id="themes" class="glass"><button data-theme="nebula">Nebula</button><button data-theme="forest">Forest</button></div>
+    <div id="modes" class="glass"><button data-mode="scroll">Scroll</button><button data-mode="page">Page</button><span id="pageno"></span></div>
     <div id="leader"></div>
     <div id="tag" class="glass"><div class="row"><i class="dot"></i><span id="tagText"></span></div><small id="tagSub"></small></div>
     <div id="hud" class="glass">

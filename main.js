@@ -179,6 +179,8 @@ const THEMES = {
     text: { link: '#8ccbff', linkLine: 'rgba(140, 203, 255, 0.5)', bullet: '#7cc0ff' },
     chip: 'rgba(24, 32, 84, 0.86)', chipSoft: 'rgba(40, 52, 120, 0.82)', miniLine: '#a9c1ff',
     hue: (h) => h, trailHue: [0.58, 0.2],
+    // page view: the paper itself and the ink printed on it
+    paper: { base: '#ece8f0', edge: '#bdb6cf', ink: '#241f33', link: '#2b4fb8', sub: 'rgba(36, 31, 51, 0.62)', rule: 'rgba(36, 31, 51, 0.30)', plate: 'rgba(22, 30, 70, 0.94)' },
     css: {
       '--bg': '#0b1233', '--pill-top': 'rgba(255, 255, 255, 0.20)', '--pill-bot': 'rgba(255, 255, 255, 0.08)',
       '--pill-edge': 'rgba(255, 255, 255, 0.28)', '--pill-text': 'rgba(255, 255, 255, 0.92)',
@@ -197,6 +199,7 @@ const THEMES = {
     chip: 'rgba(8, 44, 26, 0.88)', chipSoft: 'rgba(10, 60, 34, 0.85)', miniLine: '#b9f0c0',
     hue: (h) => 0.06 + h * 0.44, // amber, gold, moss, jade, teal: nothing outside the forest palette
     trailHue: [0.12, 0.18],
+    paper: { base: '#ece8cc', edge: '#b9b88a', ink: '#1c2a1a', link: '#1f7a45', sub: 'rgba(28, 42, 26, 0.62)', rule: 'rgba(28, 42, 26, 0.30)', plate: 'rgba(8, 40, 24, 0.94)' },
     css: {
       '--bg': '#04100a', '--pill-top': 'rgba(210, 255, 225, 0.20)', '--pill-bot': 'rgba(210, 255, 225, 0.07)',
       '--pill-edge': 'rgba(220, 255, 230, 0.28)', '--pill-text': 'rgba(240, 255, 244, 0.94)',
@@ -222,6 +225,7 @@ const T = { // live values, read by the shaders
   pink: C(theme.sky.pink), ray: C(theme.sky.ray),
   pane: V(theme.pane), frost: V(theme.frost), rim: V(theme.rim), accent: V(theme.accent),
   line: V(theme.line), dust: V(theme.dust), nums: V(theme.nums), nums2: V(theme.nums2),
+  paper: C(theme.paper.base), paperEdge: C(theme.paper.edge),
 };
 const G = Object.fromEntries(Object.entries(T).map(([k, v]) => [k, v.clone()])); // where they are heading
 
@@ -229,6 +233,7 @@ function setThemeGoals(th) {
   G.clear.set(th.clear); G.fog.set(th.fog);
   for (const k of ['navy', 'blue', 'violet', 'teal', 'pink', 'ray']) G[k].set(th.sky[k]);
   for (const k of ['pane', 'frost', 'rim', 'accent', 'line', 'dust', 'nums', 'nums2']) G[k].fromArray(th[k]);
+  G.paper.set(th.paper.base); G.paperEdge.set(th.paper.edge);
   for (const [k, v] of Object.entries(th.css)) document.documentElement.style.setProperty(k, v);
 }
 setThemeGoals(theme);
@@ -568,6 +573,7 @@ function makeGlassMaterial() {
       uBackdropMix: { value: 0 },
       uHover: { value: 0 },
       uDim: { value: 0 },                               // fades the page content while you zoom into its mini graph
+      uHide: { value: 0 },                              // 1 = the glass is gone because the note has turned into paper
       uPointer: { value: new THREE.Vector2(0.5, 0.5) }, // where the cursor touches the pane (uv)
       uSeed: { value: seedCounter++ * 0.37 },           // desynchronises the sheen sweeps
       uSize: { value: new THREE.Vector2(PANEL_W, PANEL_H) },
@@ -594,6 +600,7 @@ function makeGlassMaterial() {
       uniform float uBackdropMix;
       uniform float uHover;
       uniform float uDim;
+      uniform float uHide;
       uniform float uTime;
       uniform float uSeed;
       uniform vec2 uPointer;
@@ -684,7 +691,7 @@ function makeGlassMaterial() {
         a = max(a, t.a);
 
         a *= 1.0 - smoothstep(uFog.x, uFog.y, vDepth) * 0.85 * (1.0 - 0.9 * uLod);   // icon tiles stay visible at any distance
-        gl_FragColor = vec4(col, clamp(a, 0.0, 1.0) * mask * uOpacity);
+        gl_FragColor = vec4(col, clamp(a, 0.0, 1.0) * mask * uOpacity * (1.0 - uHide));
         #include <colorspace_fragment>
       }`,
     transparent: true,
@@ -1477,7 +1484,7 @@ function select(node, instant = false) {
     }
   }
   refreshLinks();
-  if (node) setupMini(node);
+  if (node) { setupMini(node); attachPaper(node); }
   if (node) flyTo(node.pos, 6.5);
   else flyTo(new THREE.Vector3(), HOME_DIST);
   if (!instant) {
@@ -1890,6 +1897,398 @@ function exitGraph() {
 controls.addEventListener('start', () => { flying = false; });
 refreshLinks();
 
+// ---------- Page view: the note turns into paper ----------
+// Two ways to read an open note: the scrolling glass page, or a book. In page view the note is paginated onto
+// paper; dragging turns the leaf, which curls around a moving cylinder fold (done in the vertex shader) and
+// throws a soft shadow onto the page below it.
+
+// ?read=page wins, then the mode you last used, then scroll
+let readMode = 'scroll';
+try {
+  const asked = new URLSearchParams(location.search).get('read');
+  readMode = asked === 'page' || asked === 'scroll' ? asked : localStorage.getItem('kg-read') === 'page' ? 'page' : 'scroll';
+} catch { /* storage blocked */ }
+
+const SERIF = '"Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif';
+const PG = { W: 1024, H: 1280, pad: 104, font: 33, line: 50, gap: 16, headTop: 190, bottom: 1130 };
+
+// Splits a note into pages at block boundaries (paragraphs, bullets, figures stay whole)
+function paginate(node) {
+  if (node.pages) return node.pages;
+  const ctx = document.createElement('canvas').getContext('2d');
+  const bodyW = PG.W - PG.pad * 2;
+  ctx.font = `700 64px ${SERIF}`;
+  const titleLines = wrap(ctx, node.title, bodyW);
+  const pages = [{ items: [] }];
+  let y = PG.pad + titleLines.length * 76 + 112;
+  for (const item of node.lines) {
+    let h, lines = null;
+    if (item.type === 'img') {
+      if (!images.get(item.src)) continue;
+      h = 300 + (item.alt ? 44 : 0) + 22;
+    } else {
+      const isLi = item.type === 'li', isH = item.type === 'h';
+      ctx.font = `${isH ? '700' : '400'} ${PG.font}px ${SERIF}`;
+      lines = layoutWords(ctx, item.raw, bodyW - (isLi ? 40 : 0));
+      h = lines.length * PG.line + PG.gap + (isH ? 22 : 0);
+    }
+    let page = pages.at(-1);
+    if (y + h > PG.bottom && page.items.length) { // does not fit: start the next page
+      pages.push({ items: [] });
+      page = pages.at(-1);
+      y = PG.headTop;
+    }
+    page.items.push({ item, lines, y, h });
+    y += h;
+  }
+  node.pages = pages;
+  node.pageTex = [];
+  node.pageHits = [];
+  return pages;
+}
+
+// Ink only, on a transparent canvas: the paper itself (fibres, aged edges, spine shadow) is shaded by the GPU.
+function drawPaperPage(node, idx) {
+  const pg = paginate(node)[idx], P = theme.paper;
+  const c = document.createElement('canvas');
+  c.width = PG.W; c.height = PG.H;
+  const ctx = c.getContext('2d');
+  const bodyW = PG.W - PG.pad * 2, hits = [];
+  ctx.textBaseline = 'top';
+
+  if (idx === 0) { // title page: big title, tags in small caps, a rule
+    ctx.font = `700 64px ${SERIF}`;
+    ctx.fillStyle = P.ink;
+    let y = PG.pad;
+    for (const l of wrap(ctx, node.title, bodyW)) { ctx.fillText(l, PG.pad, y); y += 76; }
+    ctx.font = `600 22px ${SERIF}`;
+    ctx.fillStyle = P.sub;
+    if ('letterSpacing' in ctx) ctx.letterSpacing = '3px';
+    ctx.fillText(node.tags.join('   ·   ').toUpperCase(), PG.pad, y + 6);
+    if ('letterSpacing' in ctx) ctx.letterSpacing = '0px';
+    ctx.fillStyle = P.rule;
+    ctx.fillRect(PG.pad, y + 54, bodyW, 2);
+  } else { // later pages: running head
+    ctx.font = `italic 400 26px ${SERIF}`;
+    ctx.fillStyle = P.sub;
+    ctx.textAlign = 'center';
+    ctx.fillText(node.title, PG.W / 2, 96);
+    ctx.textAlign = 'left';
+    ctx.fillStyle = P.rule;
+    ctx.fillRect(PG.pad, 142, bodyW, 2);
+  }
+
+  for (const { item, lines, y } of pg.items) {
+    if (item.type === 'img') { // figures sit on a dark plate, since the diagrams are drawn in light ink
+      const img = images.get(item.src);
+      ctx.beginPath(); ctx.roundRect(PG.pad, y, bodyW, 300, 20);
+      ctx.fillStyle = P.plate; ctx.fill();
+      const fit = Math.min((bodyW - 40) / img.width, 260 / img.height);
+      ctx.drawImage(img, PG.pad + (bodyW - img.width * fit) / 2, y + (300 - img.height * fit) / 2, img.width * fit, img.height * fit);
+      if (item.alt) {
+        ctx.font = `italic 400 24px ${SERIF}`; ctx.fillStyle = P.sub;
+        ctx.fillText(item.alt, PG.pad, y + 312);
+      }
+      continue;
+    }
+    const isLi = item.type === 'li', isH = item.type === 'h', indent = isLi ? 40 : 0, top = y + (isH ? 22 : 0);
+    ctx.font = `${isH ? '700' : '400'} ${PG.font}px ${SERIF}`;
+    if (isLi) { // a small diamond for bullets
+      ctx.fillStyle = P.link;
+      ctx.beginPath();
+      const bx = PG.pad + 10, by = top + PG.font * 0.62;
+      ctx.moveTo(bx, by - 6); ctx.lineTo(bx + 6, by); ctx.lineTo(bx, by + 6); ctx.lineTo(bx - 6, by); ctx.closePath();
+      ctx.fill();
+    }
+    lines.forEach((line, i) => {
+      const ly = top + i * PG.line;
+      for (const w of line) {
+        const wx = PG.pad + indent + w.x;
+        ctx.fillStyle = w.link ? P.link : P.ink;
+        ctx.fillText(w.word, wx, ly);
+        if (w.link) {
+          ctx.fillRect(wx, ly + PG.font * 1.12, w.w, 2);
+          hits.push({ x: wx, y: ly, w: w.w, h: PG.line, link: w.link });
+        }
+      }
+    });
+  }
+
+  ctx.font = `400 26px ${SERIF}`;
+  ctx.fillStyle = P.sub;
+  ctx.textAlign = 'center';
+  ctx.fillText(`—  ${idx + 1}  —`, PG.W / 2, PG.H - 100);
+
+  node.pageHits[idx] = hits;
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return tex;
+}
+
+function getPageTex(node, i) {
+  paginate(node);
+  return (node.pageTex[i] ??= drawPaperPage(node, i));
+}
+
+// Paper: fibres, mottling, aged edges, a shadowed spine, rounded corners
+const PAPER_GLSL = /* glsl */ `
+  uniform sampler2D uInk;
+  uniform vec3 uPaper, uEdge;
+  uniform float uTime, uShine;
+  uniform vec2 uSize;
+  ${NOISE_GLSL}
+  float sdBox(vec2 p, vec2 b, float r) {
+    vec2 q = abs(p) - b + r;
+    return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r;
+  }
+  vec3 paperSurface(vec2 uv, vec4 ink) {
+    float fibre = fbm(vec3(uv * vec2(64.0, 80.0), 1.0));
+    float mottle = fbm(vec3(uv * 4.0, 7.0));
+    vec2 e = abs(uv - 0.5) * 2.0;
+    float age = smoothstep(0.80, 1.0, max(e.x, e.y));
+    vec3 base = mix(uPaper, uEdge, age * 0.85) * 0.97;
+    base *= 0.93 + 0.11 * fibre + 0.06 * (mottle - 0.5);
+    vec3 col = mix(base, ink.rgb * (0.9 + 0.1 * fibre), ink.a);
+    return col * (1.0 - exp(-uv.x * 16.0) * 0.22);                   // the gutter of the book
+  }
+  float shineBand(vec2 uv) {
+    float diag = uv.x * 0.7 + (1.0 - uv.y) * 0.7;
+    return exp(-pow((diag - (1.7 * (1.0 - uShine) - 0.25)) / 0.07, 2.0)) * uShine;
+  }`;
+
+const paper = (() => {
+  const geo = new THREE.PlaneGeometry(PANEL_W, PANEL_H, 72, 90);
+  const common = () => ({
+    uInk: { value: null }, uPaper: { value: T.paper }, uEdge: { value: T.paperEdge }, uTime: timeUniform,
+    uShine: { value: 0 }, uSize: { value: new THREE.Vector2(PANEL_W, PANEL_H) },
+    uC: { value: 1 }, uN: { value: new THREE.Vector2(1, 0) }, uR: { value: 0.15 }, uP: { value: 0 },
+  });
+
+  // the turning leaf: bent around a cylinder whose axis is the fold line
+  const leafMat = new THREE.ShaderMaterial({
+    uniforms: common(),
+    vertexShader: /* glsl */ `
+      uniform float uC;      // where the fold sits, measured along uN
+      uniform vec2 uN;       // direction the fold travels (unit)
+      uniform float uR;      // radius of the curl
+      varying vec2 vUv;
+      varying vec3 vNormal;
+      varying float vCurl;
+      void main() {
+        vUv = uv;
+        vec3 pos = position;
+        vec3 nrm = vec3(0.0, 0.0, 1.0);
+        float curl = 0.0;
+        float t = dot(pos.xy, uN) - uC;                      // distance past the fold
+        if (t > 0.0) {
+          float th = t / uR;                                 // how far round the cylinder this point has travelled
+          vec2 base = pos.xy - uN * dot(pos.xy, uN);         // the part along the fold line does not move
+          float along, z;
+          if (th <= 3.14159265) {                            // rolling up and over
+            along = uC + uR * sin(th);
+            z = uR * (1.0 - cos(th));
+            nrm = vec3(-uN * sin(th), cos(th));
+            curl = sin(th);
+          } else {                                           // folded flat again, lying face down on top
+            along = uC - (t - 3.14159265 * uR);
+            z = 2.0 * uR;
+            nrm = vec3(0.0, 0.0, -1.0);
+          }
+          pos = vec3(base + uN * along, z);
+        }
+        vNormal = normalize(nrm);
+        vCurl = curl;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(pos, 1.0);
+      }`,
+    fragmentShader: /* glsl */ `
+      varying vec2 vUv;
+      varying vec3 vNormal;
+      varying float vCurl;
+      ${PAPER_GLSL}
+      void main() {
+        vec2 p = (vUv - 0.5) * uSize;
+        float d = sdBox(p, uSize * 0.5, 0.045);
+        if (d > 0.0) discard;
+        bool front = gl_FrontFacing;
+
+        // the back of the leaf: blank paper with the other side faintly showing through
+        vec2 uv = front ? vUv : vec2(1.0 - vUv.x, vUv.y);
+        vec4 ink = texture2D(uInk, uv);
+        if (!front) ink.a *= 0.13;
+        vec3 col = paperSurface(uv, ink);
+
+        vec3 N = normalize(front ? vNormal : -vNormal);
+        vec3 L = normalize(vec3(-0.35, 0.5, 0.8));
+        float light = 0.58 + 0.42 * max(dot(N, L), 0.0);
+        if (!front) light *= 0.94;
+        float spec = pow(max(reflect(-L, N).z, 0.0), 26.0) * (0.10 + 0.9 * vCurl);   // sheen along the curl
+        col = col * light + vec3(1.0, 0.97, 0.90) * spec * 0.22;
+        col += vec3(1.0, 0.98, 0.90) * shineBand(vUv) * 0.16;
+        col += vec3(1.0, 0.98, 0.9) * smoothstep(-0.007, 0.0, d) * 0.10;             // cut edge of the sheet
+
+        gl_FragColor = vec4(col, 1.0);
+        #include <colorspace_fragment>
+      }`,
+    side: THREE.DoubleSide,
+  });
+
+  // the page underneath: flat, but shadowed near and under the lifting leaf
+  const underMat = new THREE.ShaderMaterial({
+    uniforms: common(),
+    vertexShader: /* glsl */ `
+      varying vec2 vUv;
+      void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+    fragmentShader: /* glsl */ `
+      uniform float uC, uP;
+      uniform vec2 uN;
+      varying vec2 vUv;
+      ${PAPER_GLSL}
+      void main() {
+        vec2 q = (vUv - 0.5) * uSize;
+        float d = sdBox(q, uSize * 0.5, 0.045);
+        if (d > 0.0) discard;
+        vec3 col = paperSurface(vUv, texture2D(uInk, vUv));
+        float t = dot(q, uN) - uC;
+        // The leaf only hides the part of this page left of the fold; what is revealed lies in the shadow of the
+        // roll, which is darkest right at the fold and fades with distance from it.
+        float shadow = 0.62 * exp(-max(t, 0.0) / 0.30);
+        shadow *= smoothstep(0.0, 0.12, uP);
+        col *= (1.0 - shadow) * 0.92;                              // 0.92 matches the lit front of the leaf
+        col += vec3(1.0, 0.98, 0.9) * shineBand(vUv) * 0.16;
+        col += vec3(1.0, 0.98, 0.9) * smoothstep(-0.007, 0.0, d) * 0.10;
+        gl_FragColor = vec4(col, 1.0);
+        #include <colorspace_fragment>
+      }`,
+  });
+
+  const group = new THREE.Group();
+  const under = new THREE.Mesh(geo, underMat);
+  const leaf = new THREE.Mesh(geo, leafMat);
+  under.position.z = 0.02;
+  leaf.position.z = 0.03;
+  under.frustumCulled = leaf.frustumCulled = false;
+  group.add(under, leaf);
+  group.visible = false;
+  return { group, leaf, under, owner: null };
+})();
+
+const book = { cur: 0, active: false, dir: 0, L: 0, U: 0, p: 0, pV: 0, goal: 0, dragging: false, tilt: 0.12, shine: 0, lastP: 0, key: '' };
+let paperShow = 0, paperShowV = 0; // 0 = still glass, 1 = fully paper
+const modesEl = document.getElementById('modes');
+const modeBtns = [...modesEl.querySelectorAll('button')];
+const pageNoEl = document.getElementById('pageno');
+
+function updatePageNo() {
+  const n = paper.owner ? paginate(paper.owner).length : 1;
+  pageNoEl.textContent = n > 1 ? `${book.cur + 1} / ${n}` : '';
+}
+
+// The paper group rides on whichever note is open
+function attachPaper(node) {
+  if (paper.owner === node) return;
+  paper.owner?.mesh.remove(paper.group);
+  node.mesh.add(paper.group);
+  paper.owner = node;
+  Object.assign(book, { cur: 0, active: false, dir: 0, L: 0, U: 0, p: 0, pV: 0, goal: 0, dragging: false, key: '' });
+  paperShow = paperShowV = 0; // the new page unfurls from nothing
+  updatePageNo();
+}
+
+function startTurn(dir) {
+  if (book.active || !paper.owner) return false;
+  const count = paginate(paper.owner).length;
+  if ((dir > 0 && book.cur >= count - 1) || (dir < 0 && book.cur <= 0)) return false;
+  book.active = true;
+  book.dir = dir;
+  book.dragging = false;
+  if (dir > 0) { book.L = book.cur; book.U = book.cur + 1; book.p = 0; book.goal = 1; }
+  else { book.L = book.cur - 1; book.U = book.cur; book.p = 1; book.goal = 0; }
+  book.pV = 0;
+  book.lastP = book.p;
+  return true;
+}
+
+function endTurn() {
+  const done = book.dir > 0 ? book.goal >= 0.999 : book.goal <= 0.001;
+  if (done) { book.cur = book.dir > 0 ? book.U : book.L; book.shine = 1; } // a glint runs over the new page
+  Object.assign(book, { active: false, dir: 0, p: 0, pV: 0, goal: 0 });
+  updatePageNo();
+}
+
+const foldPt = new THREE.Vector3();
+
+function bookStep(t, dt) {
+  const node = paper.owner;
+  const want = readMode === 'page' && node && node === selected && node.detailed && !graphMode;
+  paperShow = THREE.MathUtils.clamp(dampTo(paperShow, paperShowV, want ? 1 : 0, 7, dt), 0, 1);
+  paperShowV = dampV;
+  paper.group.visible = !!node && paperShow > 0.01;
+  if (!paper.group.visible) return;
+
+  if (book.active && !book.dragging) { // let go: the leaf springs the rest of the way (or back)
+    book.p = dampTo(book.p, book.pV, book.goal, 8, dt);
+    book.pV = dampV;
+    if (Math.abs(book.p - book.goal) < 0.004) endTurn();
+  }
+  if (!book.dragging) book.tilt += (0.12 - book.tilt) * (1 - Math.exp(-dt * 4));
+  const speed = Math.abs(book.p - book.lastP) / Math.max(dt, 1e-3);
+  book.lastP = book.p;
+
+  // an unfurling intro / outro: while the paper fades in or out, the leaf rolls up toward the spine side
+  const pe = book.p + (1 - paperShow) * (1 - book.p);
+  const a = book.tilt, nx = Math.cos(a), ny = Math.sin(a);
+  const reach = PANEL_W / 2 * Math.abs(nx) + PANEL_H / 2 * Math.abs(ny);
+  const R = THREE.MathUtils.lerp(0.40, 0.18, pe); // a wide, soft roll rather than a hard crease
+  const c = reach - pe * (2 * reach + Math.PI * R * 1.05);
+
+  const key = `${node.index}:${book.active ? book.L : book.cur}:${book.U}:${themeName}`;
+  if (key !== book.key) {
+    book.key = key;
+    paper.leaf.material.uniforms.uInk.value = getPageTex(node, book.active ? book.L : book.cur);
+    paper.under.material.uniforms.uInk.value = getPageTex(node, book.active ? book.U : book.cur);
+  }
+  for (const m of [paper.leaf.material, paper.under.material]) {
+    m.uniforms.uC.value = c;
+    m.uniforms.uN.value.set(nx, ny);
+    m.uniforms.uR.value = R;
+    m.uniforms.uP.value = pe;
+  }
+  book.shine *= Math.exp(-dt * 1.8);
+  paper.leaf.material.uniforms.uShine.value = paper.under.material.uniforms.uShine.value = book.shine;
+  paper.leaf.visible = pe < 0.995;
+  paper.under.visible = book.active || pe > 0.001;
+
+  // VFX while a page is moving: paper dust shed along the fold, and a faint whoosh of warp
+  if (book.active && pe > 0.04 && pe < 0.96 && speed > 0.7) {
+    if (Math.random() < Math.min(1, speed * dt * 3)) {
+      const along = (Math.random() - 0.5) * PANEL_H * 0.8;
+      foldPt.set(nx * (c + R * 0.6) - ny * along, ny * (c + R * 0.6) + nx * along, R);
+      paper.group.localToWorld(foldPt);
+      emitSparks(foldPt, 1, { speed: 0.9, size: 0.7, life: 0.7, hue: 0.1, sat: 0.3, white: 0.8 });
+    }
+    if (speed > 1.2) warp = Math.max(warp, Math.min(0.1, speed * 0.025));
+  }
+}
+
+function updateModeButtons() {
+  modeBtns.forEach((b) => b.classList.toggle('on', b.dataset.mode === readMode));
+  modesEl.dataset.mode = readMode;
+}
+updateModeButtons();
+
+function setReadMode(mode) {
+  if (mode === readMode) return;
+  readMode = mode;
+  try { localStorage.setItem('kg-read', mode); } catch { /* storage blocked */ }
+  updateModeButtons();
+  if (selected?.detailed && !graphMode) {
+    fxImpact({ warpAmt: 0.35 });
+    emitSparks(selected.pos, 50, { speed: 4.5, size: 1.2, life: 1.0, hue: 0.11, sat: 0.4, white: 0.7 });
+  }
+}
+modeBtns.forEach((b) => b.addEventListener('click', () => setReadMode(b.dataset.mode)));
+
 // ---------- Input ----------
 
 const ray = new THREE.Raycaster();
@@ -1925,7 +2324,10 @@ function pick(e) {
   if (node === selected && node.detailed) {
     const [W, H] = node.hitSize;
     const px = hit.uv.x * W, py = (1 - hit.uv.y) * H;
-    link = node.hits.find((r) => px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h)?.link ?? null;
+    // in page view the links are the ones printed on the current paper page (and only while it lies flat)
+    const inBook = readMode === 'page' && paperShow > 0.5;
+    const hits = inBook ? (book.active ? [] : node.pageHits?.[book.cur] ?? []) : node.hits;
+    link = hits.find((r) => px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h)?.link ?? null;
   }
   return { node, link, uv: hit.uv };
 }
@@ -1941,9 +2343,50 @@ function spinMini(yaw, pitch) {
   mini.inner.quaternion.premultiply(spinQ.setFromAxisAngle(AXIS_X, pitch)).normalize();
 }
 
+// Dragging on the paper turns the page
+let pageDrag = null;
+const pagePt = new THREE.Vector3();
+
+function startPageDrag(e, hit) {
+  if (!(readMode === 'page' && selected?.detailed && !graphMode && paperShow > 0.5 && hit.node === selected)) return;
+  // how wide the page is on screen decides how far you have to drag to turn it
+  const m = selected.mesh;
+  pagePt.copy(selected.anchor).project(camera);
+  const left = (pagePt.x + 1) / 2 * innerWidth;
+  pagePt.copy(selected.anchor).addScaledVector(right, PANEL_W * m.scale.x).project(camera);
+  const pagePx = Math.max(200, (pagePt.x + 1) / 2 * innerWidth - left);
+  pageDrag = { x0: e.clientX, y0: e.clientY, x: e.clientX, t: e.timeStamp, vx: 0, pagePx };
+  renderer.domElement.setPointerCapture(e.pointerId);
+  e.stopImmediatePropagation(); // no orbiting while you turn pages
+}
+
+function movePageDrag(e) {
+  const d = pageDrag, dx = e.clientX - d.x0;
+  const dtms = e.timeStamp - d.t;
+  if (dtms > 0) d.vx = THREE.MathUtils.lerp(d.vx, (e.clientX - d.x) / dtms, 0.4);
+  d.x = e.clientX; d.t = e.timeStamp;
+  if (!book.dragging && !book.active && Math.abs(dx) > 8 && startTurn(dx < 0 ? 1 : -1)) book.dragging = true;
+  if (!book.dragging) return;
+  book.p = THREE.MathUtils.clamp(book.dir > 0 ? -dx / (d.pagePx * 0.95) : 1 - dx / (d.pagePx * 0.95), 0, 1);
+  book.pV = 0;
+  book.tilt = THREE.MathUtils.clamp((d.y0 - e.clientY) / d.pagePx * 0.9, -0.45, 0.45); // the fold leans with your hand
+}
+
+function finishPageDrag() {
+  const d = pageDrag;
+  pageDrag = null;
+  if (!d || !book.dragging) return;
+  book.dragging = false;
+  // past a third of the way, or flicked hard enough: it carries on; otherwise it falls back
+  const flick = 0.5; // px per ms
+  const carry = book.dir > 0 ? book.p > 0.3 || d.vx < -flick : book.p < 0.7 || d.vx > flick;
+  book.goal = book.dir > 0 ? (carry ? 1 : 0) : (carry ? 0 : 1);
+}
+
 renderer.domElement.addEventListener('pointerdown', (e) => {
   downAt = [e.clientX, e.clientY];
-  if (!pick(e).onMini) return;
+  const hit0 = pick(e);
+  if (!hit0.onMini) { startPageDrag(e, hit0); return; }
   miniDrag = { x: e.clientX, y: e.clientY, t: e.timeStamp };
   miniSpin.set(0, 0);
   renderer.domElement.setPointerCapture(e.pointerId);
@@ -1951,7 +2394,7 @@ renderer.domElement.addEventListener('pointerdown', (e) => {
   e.stopImmediatePropagation();
 }, { capture: true });
 
-const endMiniDrag = () => { miniDrag = null; };
+const endMiniDrag = () => { miniDrag = null; finishPageDrag(); };
 addEventListener('pointerup', endMiniDrag);
 addEventListener('pointercancel', endMiniDrag);
 renderer.domElement.addEventListener('pointerup', (e) => {
@@ -1967,6 +2410,12 @@ renderer.domElement.addEventListener('pointerup', (e) => {
     else if (mz < 0.25) enterGraph();      // a plain click on the widget opens the isolated graph
   }
   else if (link) select(link);
+  else if (node === selected && readMode === 'page' && paperShow > 0.5 && !book.active) {
+    // tapping the outer edge of the paper turns the page, like a thumb on the corner of a book
+    const u = pick(e).uv?.x ?? 0.5;
+    if (u > 0.72) startTurn(1);
+    else if (u < 0.28) startTurn(-1);
+  }
   else if (node && node !== selected) select(node);
   else if (!node && selected) select(null);
 });
@@ -1986,7 +2435,8 @@ function emitTrail(e) {
 }
 
 renderer.domElement.addEventListener('pointermove', (e) => {
-  if (!miniDrag && e.buttons === 0) emitTrail(e);
+  if (!miniDrag && !pageDrag && e.buttons === 0) emitTrail(e);
+  if (pageDrag) { movePageDrag(e); renderer.domElement.style.cursor = 'grabbing'; return; }
   if (miniDrag) {
     const dtm = Math.max((e.timeStamp - miniDrag.t) / 1000, 0.008);
     const yaw = (e.clientX - miniDrag.x) * 0.012, pitch = (e.clientY - miniDrag.y) * 0.012;
@@ -2003,8 +2453,10 @@ renderer.domElement.addEventListener('pointermove', (e) => {
   miniBead = bead ?? null;
   if (onMini) miniPointer.set(miniUV.x * 2 - 1, miniUV.y * 2 - 1);
   else if (node) node.mesh.material.uniforms.uPointer.value.copy(uv); // the glass lights up under the cursor
+  const onPaper = node === selected && readMode === 'page' && paperShow > 0.5 && !graphMode;
   renderer.domElement.style.cursor = onMini ? (bead ? 'pointer' : 'grab')
-    : node && (link || node !== selected || graphMode) ? 'pointer' : 'default';
+    : link ? 'pointer' : onPaper ? 'grab'
+    : node && (node !== selected || graphMode) ? 'pointer' : 'default';
 });
 
 // Scrolling the open page: the wheel scrolls it while the pointer is over it (and zooms elsewhere),
@@ -2027,8 +2479,14 @@ renderer.domElement.addEventListener('wheel', (e) => {
   if (node !== selected) return;
   e.preventDefault();
   e.stopImmediatePropagation(); // keep OrbitControls from zooming
+  if (readMode === 'page' && paperShow > 0.5) { // on paper, the wheel turns pages (with a short cooldown)
+    const now = performance.now();
+    if (Math.abs(e.deltaY) > 8 && now > wheelReady && startTurn(e.deltaY > 0 ? 1 : -1)) wheelReady = now + 650;
+    return;
+  }
   scrollPage(e.deltaY * (e.deltaMode === 1 ? 40 : 1.4));
 }, { capture: true, passive: false });
+let wheelReady = 0;
 
 // Whatever the wheel did not already claim (page scroll, mini-graph zoom) zooms the camera.
 // Zoom is multiplicative, so it feels the same close up and far away.
@@ -2049,6 +2507,15 @@ addEventListener('keydown', (e) => {
     if (mzGoal > 0.02) mzGoal = 0;
     else if (graphMode) exitGraph();
     else if (selected) select(null);
+  }
+  if (e.key.toLowerCase() === 'p' && !e.metaKey && !e.ctrlKey && !e.altKey && selected?.detailed) {
+    setReadMode(readMode === 'page' ? 'scroll' : 'page');
+    return;
+  }
+  if (readMode === 'page' && selected?.detailed && !graphMode) { // on paper the arrows turn pages
+    const dir = { ArrowRight: 1, ArrowDown: 1, PageDown: 1, ' ': 1, ArrowLeft: -1, ArrowUp: -1, PageUp: -1 }[e.key];
+    if (dir) { e.preventDefault(); startTurn(dir); }
+    return;
   }
   const step = { ArrowDown: 120, ArrowUp: -120, PageDown: 700, PageUp: -700, ' ': 700 }[e.key];
   if (step && selected) { e.preventDefault(); scrollPage(step); }
@@ -2134,6 +2601,10 @@ function setTheme(name) {
     u.uMap2.value = drawFace(n);
   }
   chipCache.clear();
+  for (const n of nodes) { // paper pages carry theme colours in their ink, so they are re-typeset
+    n.pageTex?.forEach((tex) => tex?.dispose());
+    n.pages = n.pageTex = n.pageHits = null;
+  }
   mini.label.material.map?.dispose();
   mini.label.material.map = makeLabelTex();
   mini.label.material.needsUpdate = true;
@@ -2161,6 +2632,7 @@ function stepTheme(dt) {
 
 const startMs = performance.now();
 let lastT = 0;
+let modesShown = false;
 
 renderer.setAnimationLoop(() => {
   const t = (performance.now() - startMs) / 1000;
@@ -2231,9 +2703,14 @@ renderer.setAnimationLoop(() => {
     u.uOpacity.value = THREE.MathUtils.lerp(u.uOpacity.value, og, 0.1);
     u.uHover.value = THREE.MathUtils.lerp(u.uHover.value, hv, 0.15);
     u.uDim.value = n === selected ? (mini.zoomE || 0) : 0;
+    u.uHide.value = n === selected ? paperShow : 0; // the glass gives way to paper in page view
     u.uBackdropMix.value = THREE.MathUtils.lerp(u.uBackdropMix.value, n === selected && n.detailed ? 1 : 0, 0.1);
     n.icon.visible = m.visible = u.uOpacity.value > 0.01 || n.opacityGoal > 0.01; // fully faded notes are neither drawn nor pickable
   }
+
+  bookStep(t, dt);
+  const showModes = !!(selected?.detailed && !graphMode);
+  if (showModes !== modesShown) { modesShown = showModes; modesEl.classList.toggle('show', showModes); }
 
   // Graph screen: hovering a tile lights its connections and dims the notes it is not linked to
   if (graphMode) {
@@ -2249,7 +2726,7 @@ renderer.setAnimationLoop(() => {
 
   // Mini graph: lifts off the page, leans toward the cursor and spins up while hovered
   if (mini.owner) {
-    const showTarget = selected?.detailed && !graphMode ? 1 : 0;
+    const showTarget = selected?.detailed && !graphMode && readMode === 'scroll' ? 1 : 0; // the bubble belongs to the glass page
     mini.show = dampTo(mini.show, mini.showV || 0, showTarget, 8, dt); mini.showV = dampV;
     mini.hover = dampTo(mini.hover, mini.hoverV || 0, miniHovered && showTarget ? 1 : 0, 9, dt); mini.hoverV = dampV;
     mini.hover = THREE.MathUtils.clamp(mini.hover, 0, 1);
@@ -2391,7 +2868,7 @@ renderer.setAnimationLoop(() => {
     tetherGeo.attributes.aVis.needsUpdate = true;
   }
 
-  if (selected?.detailed) renderBackdrop(selected); // blurred copy of everything behind the open page
+  if (selected?.detailed && paperShow < 0.98) renderBackdrop(selected); // blurred copy of everything behind the glass page
   // VFX decay, then the whole frame goes through bloom + the lens pass
   warp *= Math.exp(-dt * 3.2);
   flash *= Math.exp(-dt * 5);
