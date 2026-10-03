@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="200" viewBox="0 0 400 200" fill="none" stroke="#d6e8ff" stroke-width="2" font-family="Segoe UI, sans-serif" font-size="14" text-anchor="middle">
+  <path d="M200 44 L110 84 M200 44 L290 84 M110 110 L60 150 M110 110 L160 150"/>
+  <g fill="#5b7fc0">
+    <rect x="165" y="18" width="70" height="26" rx="4"/>
+    <rect x="75" y="84" width="70" height="26" rx="4"/>
+    <rect x="255" y="84" width="70" height="26" rx="4"/>
+    <rect x="25" y="150" width="70" height="26" rx="4"/>
+    <rect x="125" y="150" width="70" height="26" rx="4"/>
+  </g>
+  <g fill="#ffffff" stroke="none">
+    <text x="200" y="36">Scene</text>
+    <text x="110" y="102">Group</text>
+    <text x="290" y="102">Camera</text>
+    <text x="60" y="168">Mesh A</text>
+    <text x="160" y="168">Mesh B</text>
+  </g>
+  <text x="330" y="168" fill="#ffc46b" stroke="none" font-size="13">children inherit</text>
+  <text x="330" y="184" fill="#ffc46b" stroke="none" font-size="13">parent transforms</text>
+</svg>

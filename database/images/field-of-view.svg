@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="200" viewBox="0 0 400 200" fill="none" stroke="#d6e8ff" stroke-width="2" font-family="Segoe UI, sans-serif">
+  <path d="M60 100 L350 18 L350 182 Z" fill="#d6e8ff" fill-opacity=".12"/>
+  <circle cx="60" cy="100" r="9" fill="#ffffff" stroke="none"/>
+  <path d="M110 84 A55 55 0 0 1 110 116" stroke="#ffc46b"/>
+  <text x="122" y="105" fill="#ffc46b" stroke="none" font-size="17">~110°</text>
+  <rect x="280" y="75" width="40" height="50" stroke-dasharray="5 4"/>
+  <text x="200" y="190" fill="#d6e8ff" stroke="none" text-anchor="middle" font-size="14">visible area grows with the angle</text>
+</svg>

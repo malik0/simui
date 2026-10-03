@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="200" viewBox="0 0 400 200" fill="none" stroke="#d6e8ff" stroke-width="2" font-family="Segoe UI, sans-serif" font-size="14">
+  <defs>
+    <marker id="a" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="#d6e8ff" stroke="none"/></marker>
+  </defs>
+  <g marker-end="url(#a)">
+    <path d="M150 105 H260"/>
+    <path d="M150 105 V20"/>
+    <path d="M150 105 L90 160"/>
+  </g>
+  <g fill="#ffffff" stroke="none">
+    <text x="266" y="110">X</text>
+    <text x="156" y="22">Y</text>
+    <text x="72" y="170">Z</text>
+  </g>
+  <g stroke="#ffc46b" marker-end="url(#a)">
+    <path d="M300 60 A38 38 0 0 1 340 100"/>
+    <path d="M345 135 A38 38 0 0 1 305 170"/>
+  </g>
+  <text x="290" y="40" fill="#ffc46b" stroke="none">rotate</text>
+  <text x="285" y="190" fill="#ffc46b" stroke="none">pitch · yaw · roll</text>
+  <text x="170" y="190" fill="#ffffff" stroke="none">move: x · y · z</text>
+</svg>

@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="200" viewBox="0 0 400 200" fill="none" stroke="#d6e8ff" stroke-width="2" font-family="Segoe UI, sans-serif">
+  <circle cx="60" cy="78" r="8" fill="#ffffff" stroke="none"/>
+  <circle cx="60" cy="122" r="8" fill="#ffffff" stroke="none"/>
+  <text x="30" y="82" fill="#d6e8ff" stroke="none" font-size="14">L</text>
+  <text x="30" y="126" fill="#d6e8ff" stroke="none" font-size="14">R</text>
+  <rect x="270" y="70" width="60" height="60" fill="#d6e8ff" fill-opacity=".2"/>
+  <path d="M60 78 L270 70 M60 78 L270 130"/>
+  <path d="M60 122 L270 70 M60 122 L270 130" stroke="#ffc46b" stroke-dasharray="6 4"/>
+  <text x="200" y="175" fill="#d6e8ff" stroke="none" text-anchor="middle" font-size="14">two cameras, one scene, two slightly different images</text>
+</svg>

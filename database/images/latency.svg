@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="200" viewBox="0 0 400 200" fill="none" stroke="#d6e8ff" stroke-width="2" font-family="Segoe UI, sans-serif" font-size="13" text-anchor="middle">
+  <defs>
+    <marker id="a" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0 0 L8 4 L0 8 z" fill="#d6e8ff" stroke="none"/></marker>
+  </defs>
+  <g fill="#5b7fc0">
+    <rect x="10" y="55" width="80" height="44" rx="4"/>
+    <rect x="110" y="55" width="80" height="44" rx="4"/>
+    <rect x="210" y="55" width="80" height="44" rx="4"/>
+    <rect x="310" y="55" width="80" height="44" rx="4"/>
+  </g>
+  <g marker-end="url(#a)">
+    <path d="M90 77 H108 M190 77 H208 M290 77 H308"/>
+  </g>
+  <g fill="#ffffff" stroke="none">
+    <text x="50" y="82">Head moves</text>
+    <text x="150" y="82">Tracking</text>
+    <text x="250" y="82">Render</text>
+    <text x="350" y="82">Display</text>
+  </g>
+  <path d="M10 125 V135 H390 V125" stroke="#ffc46b"/>
+  <text x="200" y="158" fill="#ffc46b" stroke="none" font-size="15">motion-to-photon: aim for under ~20 ms</text>
+</svg>

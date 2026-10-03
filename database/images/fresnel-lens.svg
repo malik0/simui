@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="200" viewBox="0 0 400 200" fill="none" stroke="#d6e8ff" stroke-width="2" font-family="Segoe UI, sans-serif" font-size="14" text-anchor="middle">
+  <path d="M100 25 Q150 100 100 175 Q50 100 100 25 Z" fill="#d6e8ff" fill-opacity=".18"/>
+  <path d="M300 25 V50 L270 66 L300 66 V86 L270 102 L300 102 V122 L270 138 L300 138 V158 L270 175 H300" fill="#d6e8ff" fill-opacity=".18"/>
+  <path d="M300 25 H300 M300 175 V25" stroke-opacity=".6"/>
+  <text x="100" y="195" fill="#ffffff" stroke="none">standard lens</text>
+  <text x="290" y="195" fill="#ffffff" stroke="none">Fresnel lens</text>
+  <text x="200" y="105" fill="#ffc46b" stroke="none" font-size="22">≈</text>
+</svg>

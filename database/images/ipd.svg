@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="200" viewBox="0 0 400 200" fill="none" stroke="#d6e8ff" stroke-width="2" font-family="Segoe UI, sans-serif">
+  <ellipse cx="130" cy="85" rx="48" ry="30"/>
+  <circle cx="130" cy="85" r="17" fill="#d6e8ff" fill-opacity=".25"/>
+  <circle cx="130" cy="85" r="6" fill="#ffffff" stroke="none"/>
+  <ellipse cx="270" cy="85" rx="48" ry="30"/>
+  <circle cx="270" cy="85" r="17" fill="#d6e8ff" fill-opacity=".25"/>
+  <circle cx="270" cy="85" r="6" fill="#ffffff" stroke="none"/>
+  <g stroke="#ffc46b">
+    <path d="M130 125 V152 M270 125 V152 M130 140 H270"/>
+    <path d="M130 140 l10 -5 v10 z M270 140 l-10 -5 v10 z" fill="#ffc46b"/>
+  </g>
+  <text x="200" y="178" fill="#ffc46b" stroke="none" text-anchor="middle" font-size="17">IPD ≈ 63 mm (average adult)</text>
+</svg>
