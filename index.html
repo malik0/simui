@@ -5,7 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Knowledge Space</title>
     <style>
-      html, body { margin: 0; height: 100%; overflow: hidden; background: #0b1233; }
+      /* the theme colours (--bg, --pill-*, --vignette, ...) are set from main.js */
+      html, body { margin: 0; height: 100%; overflow: hidden; background: var(--bg, #0b1233); }
       canvas { display: block; }
       body {
         font-family: -apple-system, "SF Pro Text", "Segoe UI Variable Text", "Segoe UI", Inter, system-ui, sans-serif;
@@ -14,15 +15,15 @@
       /* soft vignette so the eye settles on the centre */
       body::after {
         content: ""; position: fixed; inset: 0; pointer-events: none;
-        background: radial-gradient(ellipse at center, transparent 55%, rgba(2, 4, 18, 0.55) 100%);
+        background: radial-gradient(ellipse at center, transparent 55%, var(--vignette, rgba(2, 4, 18, 0.55)) 100%);
       }
       .glass {
         z-index: 2;
         position: fixed; pointer-events: none;
         padding: 9px 16px; border-radius: 999px;
-        color: rgba(255, 255, 255, 0.92);
-        background: linear-gradient(180deg, rgba(255, 255, 255, 0.20), rgba(255, 255, 255, 0.08));
-        border: 1px solid rgba(255, 255, 255, 0.28);
+        color: var(--pill-text, rgba(255, 255, 255, 0.92));
+        background: linear-gradient(180deg, var(--pill-top, rgba(255, 255, 255, 0.20)), var(--pill-bot, rgba(255, 255, 255, 0.08)));
+        border: 1px solid var(--pill-edge, rgba(255, 255, 255, 0.28));
         box-shadow: 0 8px 30px rgba(0, 0, 0, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.35);
         -webkit-backdrop-filter: blur(24px) saturate(1.8);
         backdrop-filter: blur(24px) saturate(1.8);
@@ -51,6 +52,15 @@
       }
       #back:hover { transform: translateX(-2px); background: linear-gradient(180deg, rgba(255, 255, 255, 0.32), rgba(255, 255, 255, 0.14)); }
       #back[hidden] { display: none; }
+      /* theme switcher: a glass segmented control, top right */
+      #themes { right: 18px; top: 14px; pointer-events: auto; display: flex; gap: 2px; padding: 4px; }
+      #themes button {
+        font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; border: 0; border-radius: 999px;
+        padding: 6px 14px; color: inherit; background: transparent; opacity: 0.7;
+        transition: background 0.25s ease, opacity 0.25s ease, transform 0.15s ease;
+      }
+      #themes button:hover { opacity: 1; transform: translateY(-1px); }
+      #themes button.on { opacity: 1; background: var(--tint, rgba(70, 90, 210, 0.35)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35); }
       #hud {
         left: 50%; bottom: 18px; transform: translateX(-50%);
         font-size: 12.5px; font-weight: 500; white-space: nowrap; color: rgba(255, 255, 255, 0.78);
@@ -62,10 +72,11 @@
   <body>
     <div id="crumb" class="glass">Knowledge Space</div>
     <button id="back" class="glass" hidden>&#8249; Back to page</button>
+    <div id="themes" class="glass"><button data-theme="nebula">Nebula</button><button data-theme="forest">Forest</button></div>
     <div id="leader"></div>
     <div id="tag" class="glass"><div class="row"><i class="dot"></i><span id="tagText"></span></div><small id="tagSub"></small></div>
     <div id="hud" class="glass">
-      <b>Drag</b> orbit &nbsp;·&nbsp; <b>Scroll</b> zoom, read a page, or dive into its mini graph &nbsp;·&nbsp; <b>Click</b> a panel to open &nbsp;·&nbsp; <b>Esc</b> or click empty space to go back
+      <b>Drag</b> orbit &nbsp;·&nbsp; <b>Scroll</b> zoom, read a page, or dive into its mini graph &nbsp;·&nbsp; <b>Click</b> a panel to open &nbsp;·&nbsp; <b>Esc</b> or click empty space to go back &nbsp;·&nbsp; <b>T</b> switch theme
     </div>
     <script type="module" src="/main.js"></script>
   </body>

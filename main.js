@@ -162,11 +162,83 @@ for (const n of nodes) {
   }
 })();
 
+// ---------- Themes ----------
+
+// A theme is a palette plus a few knobs. Every colour a shader reads lives in `T`, which eases toward the goal
+// values in `G` whenever the theme changes, so switching blends smoothly instead of popping. Colours baked into
+// textures (page text, tiles, icons) are simply redrawn.
+const THEMES = {
+  nebula: {
+    label: 'Nebula',
+    clear: '#070b24', fog: '#141a45',
+    sky: { navy: '#060a22', blue: '#2a63ff', violet: '#9442ff', teal: '#12c9c4', pink: '#ff4f9c', ray: '#ffffff' },
+    pane: [0.50, 0.58, 0.80], frost: [0.05, 0.06, 0.085], rim: [1, 1, 1], accent: [0.55, 0.68, 1.0],
+    line: [0.45, 0.60, 1.0], dust: [0.78, 0.86, 1.0],
+    nums: [0, 0.55, 1.4],  // god rays, bloom strength, twinkle speed
+    nums2: [0.15, 1, 0],   // dust drift, dust size
+    text: { link: '#8ccbff', linkLine: 'rgba(140, 203, 255, 0.5)', bullet: '#7cc0ff' },
+    chip: 'rgba(24, 32, 84, 0.86)', chipSoft: 'rgba(40, 52, 120, 0.82)', miniLine: '#a9c1ff',
+    hue: (h) => h, trailHue: [0.58, 0.2],
+    css: {
+      '--bg': '#0b1233', '--pill-top': 'rgba(255, 255, 255, 0.20)', '--pill-bot': 'rgba(255, 255, 255, 0.08)',
+      '--pill-edge': 'rgba(255, 255, 255, 0.28)', '--pill-text': 'rgba(255, 255, 255, 0.92)',
+      '--vignette': 'rgba(2, 4, 18, 0.55)', '--tint': 'rgba(70, 90, 210, 0.35)',
+    },
+  },
+  forest: {
+    label: 'Forest',
+    clear: '#03100a', fog: '#0b2a1b',
+    sky: { navy: '#030d08', blue: '#0e5233', violet: '#1d7a3d', teal: '#1fb89a', pink: '#e0b84c', ray: '#ffe7a0' },
+    pane: [0.42, 0.70, 0.52], frost: [0.025, 0.075, 0.04], rim: [1.0, 0.96, 0.78], accent: [0.65, 1.0, 0.70],
+    line: [0.55, 0.90, 0.60], dust: [1.0, 0.88, 0.45], // fireflies
+    nums: [1.0, 0.62, 2.2],
+    nums2: [1.0, 1.35, 0],
+    text: { link: '#a9f0b8', linkLine: 'rgba(169, 240, 184, 0.5)', bullet: '#ffd57a' },
+    chip: 'rgba(8, 44, 26, 0.88)', chipSoft: 'rgba(10, 60, 34, 0.85)', miniLine: '#b9f0c0',
+    hue: (h) => 0.06 + h * 0.44, // amber, gold, moss, jade, teal: nothing outside the forest palette
+    trailHue: [0.12, 0.18],
+    css: {
+      '--bg': '#04100a', '--pill-top': 'rgba(210, 255, 225, 0.20)', '--pill-bot': 'rgba(210, 255, 225, 0.07)',
+      '--pill-edge': 'rgba(220, 255, 230, 0.28)', '--pill-text': 'rgba(240, 255, 244, 0.94)',
+      '--vignette': 'rgba(1, 10, 4, 0.62)', '--tint': 'rgba(40, 150, 80, 0.35)',
+    },
+  },
+};
+
+// ?theme=forest wins, then the last theme you picked, then nebula
+let themeName = 'nebula';
+try {
+  const asked = new URLSearchParams(location.search).get('theme'), saved = localStorage.getItem('kg-theme');
+  themeName = THEMES[asked] ? asked : THEMES[saved] ? saved : 'nebula';
+} catch { /* storage blocked */ }
+let theme = THEMES[themeName];
+const hueOf = (n) => theme.hue(n.hue); // a note's colour, mapped into the current theme's palette
+
+const C = (hex) => new THREE.Color(hex);
+const V = (a) => new THREE.Vector3().fromArray(a);
+const T = { // live values, read by the shaders
+  clear: C(theme.clear), fog: C(theme.fog),
+  navy: C(theme.sky.navy), blue: C(theme.sky.blue), violet: C(theme.sky.violet), teal: C(theme.sky.teal),
+  pink: C(theme.sky.pink), ray: C(theme.sky.ray),
+  pane: V(theme.pane), frost: V(theme.frost), rim: V(theme.rim), accent: V(theme.accent),
+  line: V(theme.line), dust: V(theme.dust), nums: V(theme.nums), nums2: V(theme.nums2),
+};
+const G = Object.fromEntries(Object.entries(T).map(([k, v]) => [k, v.clone()])); // where they are heading
+
+function setThemeGoals(th) {
+  G.clear.set(th.clear); G.fog.set(th.fog);
+  for (const k of ['navy', 'blue', 'violet', 'teal', 'pink', 'ray']) G[k].set(th.sky[k]);
+  for (const k of ['pane', 'frost', 'rim', 'accent', 'line', 'dust', 'nums', 'nums2']) G[k].fromArray(th[k]);
+  for (const [k, v] of Object.entries(th.css)) document.documentElement.style.setProperty(k, v);
+}
+setThemeGoals(theme);
+
 // ---------- Scene ----------
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x070b24);
+scene.background = T.clear;
 scene.fog = new THREE.Fog(0x141a45, 10, 40);
+scene.fog.color = T.fog;
 
 const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 200);
 const HOME_DIR = new THREE.Vector3(0.25, 0.15, 1).normalize();
@@ -217,11 +289,13 @@ const sky = new THREE.Mesh(
   new THREE.ShaderMaterial({
     uniforms: {
       uTime: timeUniform,
-      uNavy: { value: new THREE.Color('#060a22') },
-      uBlue: { value: new THREE.Color('#2a63ff') },
-      uViolet: { value: new THREE.Color('#9442ff') },
-      uTeal: { value: new THREE.Color('#12c9c4') },
-      uPink: { value: new THREE.Color('#ff4f9c') },
+      uNavy: { value: T.navy },
+      uBlue: { value: T.blue },
+      uViolet: { value: T.violet },
+      uTeal: { value: T.teal },
+      uPink: { value: T.pink },
+      uRayColor: { value: T.ray },
+      uNums: { value: T.nums }, // x = how strong the god rays are (0 in the nebula, 1 in the forest)
     },
     vertexShader: /* glsl */ `
       varying vec3 vDir;
@@ -231,7 +305,7 @@ const sky = new THREE.Mesh(
       }`,
     fragmentShader: /* glsl */ `
       uniform float uTime;
-      uniform vec3 uNavy, uBlue, uViolet, uTeal, uPink;
+      uniform vec3 uNavy, uBlue, uViolet, uTeal, uPink, uRayColor, uNums;
       varying vec3 vDir;
       ${NOISE_GLSL}
       void main() {
@@ -250,6 +324,12 @@ const sky = new THREE.Mesh(
         col = mix(col, uTeal,   smoothstep(0.50, 0.85, n3) * smoothstep(0.35, -0.55, d.y) * 0.55);
         col = mix(col, uPink,   smoothstep(0.62, 0.90, n2 * n3 * 1.9) * 0.40);
         col *= 0.85 + 0.25 * smoothstep(-0.8, 0.8, d.y);
+
+        // god rays: shafts of light falling through a canopy, drifting slowly (forest theme only)
+        float azimuth = atan(d.x, d.z);
+        float shafts = pow(fbm(vec3(azimuth * 2.6, uTime * 0.05, 4.0)), 3.0);
+        col += uRayColor * uNums.x * shafts * 2.4 * smoothstep(0.02, 0.95, d.y);
+
         gl_FragColor = vec4(col, 1.0);
         #include <colorspace_fragment>
       }`,
@@ -278,29 +358,37 @@ scene.add(sky);
   g.setAttribute('aSize', new THREE.BufferAttribute(size, 1));
   g.setAttribute('aPhase', new THREE.BufferAttribute(phase, 1));
   scene.add(new THREE.Points(g, new THREE.ShaderMaterial({
-    uniforms: { uTime: timeUniform, uPx: { value: renderer.getPixelRatio() } },
+    // stars in the nebula, drifting fireflies in the forest: same particles, different colour / twinkle / wander
+    uniforms: {
+      uTime: timeUniform, uPx: { value: renderer.getPixelRatio() },
+      uDust: { value: T.dust }, uNums: { value: T.nums }, uNums2: { value: T.nums2 },
+    },
     vertexShader: /* glsl */ `
       attribute float aSize;
       attribute float aPhase;
       uniform float uTime;
       uniform float uPx;
+      uniform vec3 uNums;   // z = twinkle speed
+      uniform vec3 uNums2;  // x = wander amount, y = size
       varying float vTw;
       varying float vDepth;
       void main() {
-        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        vec3 wander = uNums2.x * 0.6 * vec3(sin(uTime * 0.31 + aPhase), cos(uTime * 0.23 + aPhase * 1.7), sin(uTime * 0.19 + aPhase * 0.6));
+        vec4 mv = modelViewMatrix * vec4(position + wander, 1.0);
         vDepth = -mv.z;
-        vTw = 0.55 + 0.45 * sin(uTime * 1.4 + aPhase);
-        gl_PointSize = aSize * uPx * 70.0 / max(vDepth, 1.0);
+        vTw = 0.55 + 0.45 * sin(uTime * uNums.z + aPhase);
+        gl_PointSize = aSize * uNums2.y * uPx * 70.0 / max(vDepth, 1.0);
         gl_Position = projectionMatrix * mv;
       }`,
     fragmentShader: /* glsl */ `
+      uniform vec3 uDust;
       varying float vTw;
       varying float vDepth;
       void main() {
         float d = length(gl_PointCoord - 0.5);
         float a = smoothstep(0.5, 0.0, d);
         a *= a * vTw * (1.0 - smoothstep(18.0, 38.0, vDepth));
-        gl_FragColor = vec4(0.78, 0.86, 1.0, a * 0.9);
+        gl_FragColor = vec4(uDust, a * 0.9);
         #include <colorspace_fragment>
       }`,
     transparent: true,
@@ -405,6 +493,10 @@ const shared = { // uniforms shared by every panel's material
   uRes: { value: new THREE.Vector2(1, 1) },
   uFog: { value: new THREE.Vector2(scene.fog.near, scene.fog.far) },
   uTime: timeUniform,
+  uPane: { value: T.pane },     // tints that make the glass feel like the current theme
+  uFrost: { value: T.frost },
+  uRim: { value: T.rim },
+  uAccent: { value: T.accent },
 };
 
 function resizeTargets() {
@@ -505,6 +597,10 @@ function makeGlassMaterial() {
       uniform float uTime;
       uniform float uSeed;
       uniform vec2 uPointer;
+      uniform vec3 uPane;
+      uniform vec3 uFrost;
+      uniform vec3 uRim;
+      uniform vec3 uAccent;
       varying vec2 vUv;
       varying float vDepth;
 
@@ -533,10 +629,10 @@ function makeGlassMaterial() {
           texture2D(uBackdrop, suv + bend * 0.65).b);
         float luma = dot(back, vec3(0.299, 0.587, 0.114));
         back = mix(vec3(luma), back, 1.5);                   // lift saturation, like vibrancy
-        vec3 frost = back * 0.84 + vec3(0.05, 0.06, 0.085);
+        vec3 frost = back * 0.84 + uFrost;
 
         // light pane for panels that are not backed by the live blur
-        vec3 pane = vec3(0.50, 0.58, 0.80);
+        vec3 pane = uPane;
         float paneA = 0.13 + 0.10 * vUv.y;
 
         vec3 col = mix(pane, frost, uBackdropMix);
@@ -552,7 +648,7 @@ function makeGlassMaterial() {
         float rimLit = rim * (0.30 + 0.70 * max(lit, 0.0) + 0.18 * max(-lit, 0.0));
         float glow = exp(-inner * 11.0) * 0.10 * (0.5 + 0.5 * lit);
         float sheen = smoothstep(0.35, 1.0, vUv.y) * 0.05;
-        col += vec3(rimLit * 0.95 + glow + sheen + uHover * 0.07);
+        col += uRim * (rimLit * 0.95 + glow + sheen + uHover * 0.07);
         a += rimLit * 0.55 + glow * 0.6 + uHover * 0.05;
 
         // thin-film iridescence: a rainbow fringe just inside the edge that drifts over time
@@ -565,13 +661,13 @@ function makeGlassMaterial() {
         float diag = vUv.x * 0.8 + vUv.y * 0.6;
         float pos = mix(-0.4, 1.8, fract(uTime * 0.09 + uSeed));
         float sweep = exp(-pow((diag - pos) / 0.10, 2.0));
-        col += vec3(0.85, 0.92, 1.0) * sweep * (0.05 + 0.10 * uHover + 0.05 * uBackdropMix);
+        col += mix(vec3(1.0), uRim, 0.5) * sweep * (0.05 + 0.10 * uHover + 0.05 * uBackdropMix);
         a += sweep * 0.05;
 
         // touch light: the pane catches a soft highlight where the cursor is
         vec2 dp = (vUv - uPointer) * uSize;
         float touch = exp(-dot(dp, dp) * 2.6) * uHover;
-        col += vec3(0.55, 0.68, 1.0) * touch * 0.24 + irid * touch * rim * 0.4;
+        col += uAccent * touch * 0.24 + irid * touch * rim * 0.4;
         a += touch * 0.10;
 
         // fine grain, so the frost has a physical feel
@@ -864,17 +960,17 @@ function drawPanel(node, detailed, blur = 0, scroll = 0) {
         break outer;
       }
       if (isLi && i === 0) {
-        ctx.fillStyle = '#7cc0ff';
+        ctx.fillStyle = theme.text.bullet;
         ctx.beginPath();
         ctx.arc(pad + 7 * s, y + fontPx * 0.62, 3 * s, 0, Math.PI * 2);
         ctx.fill();
       }
       for (const w of wrapped[i]) {
         const wx = pad + indent + w.x;
-        ctx.fillStyle = w.link ? '#8ccbff' : isH ? 'rgba(255, 255, 255, 0.98)' : 'rgba(255, 255, 255, 0.86)';
+        ctx.fillStyle = w.link ? theme.text.link : isH ? 'rgba(255, 255, 255, 0.98)' : 'rgba(255, 255, 255, 0.86)';
         ctx.fillText(w.word, wx, y);
         if (w.link) {
-          ctx.fillStyle = 'rgba(140, 203, 255, 0.5)';
+          ctx.fillStyle = theme.text.linkLine;
           ctx.fillRect(wx, y + fontPx * 1.17, w.w, 1.5 * s);
           const top = Math.max(y, bodyTop), bottom = Math.min(y + lineH, bodyBottom);
           if (bottom > top) hits.push({ x: wx, y: top, w: w.w, h: bottom - top, link: w.link }); // only the visible part is clickable
@@ -912,7 +1008,7 @@ function drawTile(node, blur = 0) {
   const c = document.createElement('canvas');
   c.width = W; c.height = H;
   const ctx = c.getContext('2d');
-  const cx = W / 2, hue = Math.round(node.hue * 360);
+  const cx = W / 2, hue = Math.round(hueOf(node) * 360);
 
   const glow = ctx.createRadialGradient(cx, 190 * s, 0, cx, 190 * s, 95 * s);
   glow.addColorStop(0, `hsla(${hue}, 90%, 70%, 0.85)`);
@@ -961,7 +1057,7 @@ function drawFace(node) {
   const c = document.createElement('canvas');
   c.width = W; c.height = H;
   const ctx = c.getContext('2d');
-  const cx = W / 2, cy = 245 * s, hue = Math.round(node.hue * 360);
+  const cx = W / 2, cy = 245 * s, hue = Math.round(hueOf(node) * 360);
 
   const aura = ctx.createRadialGradient(cx, cy, 0, cx, cy, 230 * s);
   aura.addColorStop(0, `hsla(${hue}, 90%, 62%, 0.55)`);
@@ -1090,7 +1186,7 @@ lineGeo.setAttribute('aHot', new THREE.BufferAttribute(lineHot, 1).setUsage(THRE
 lineGeo.setAttribute('aSeed', new THREE.BufferAttribute(lineSeed, 1));
 lineGeo.setAttribute('aVis', new THREE.BufferAttribute(lineVis, 1).setUsage(THREE.DynamicDrawUsage));
 const lineMat = new THREE.ShaderMaterial({
-  uniforms: { uTime: timeUniform, uFog: shared.uFog, uSelected: { value: 0 } },
+  uniforms: { uTime: timeUniform, uFog: shared.uFog, uSelected: { value: 0 }, uLineColor: { value: T.line } },
   vertexShader: /* glsl */ `
     attribute float aT;
     attribute float aHot;
@@ -1111,6 +1207,7 @@ const lineMat = new THREE.ShaderMaterial({
     uniform float uTime;
     uniform float uSelected;
     uniform vec2 uFog;
+    uniform vec3 uLineColor;
     varying float vT;
     varying float vHot;
     varying float vSeed;
@@ -1121,7 +1218,7 @@ const lineMat = new THREE.ShaderMaterial({
       float pulse = exp(-x * x / 0.0016);
       float a = 0.06 * (1.0 - 0.65 * uSelected) + vHot * 0.34 + pulse * (0.26 + vHot * 0.30);
       a *= (1.0 - smoothstep(uFog.x, uFog.y, vDepth) * 0.9) * vVis;
-      vec3 col = mix(vec3(0.45, 0.60, 1.0), vec3(1.0), clamp(vHot * 0.55 + pulse * 0.5, 0.0, 1.0));
+      vec3 col = mix(uLineColor, vec3(1.0), clamp(vHot * 0.55 + pulse * 0.5, 0.0, 1.0));
       gl_FragColor = vec4(col, a);
       #include <colorspace_fragment>
     }`,
@@ -1294,7 +1391,7 @@ function updateHoverTag(t, dt) {
     tagW = tagEl.offsetWidth;
     tagH = tagEl.offsetHeight;
     tagEl.style.width = `${tagW}px`; // fixed width so the scramble does not make the tag jitter
-    const c = `hsl(${Math.round(want.hue * 360)} 92% 70%)`;
+    const c = `hsl(${Math.round(hueOf(want) * 360)} 92% 70%)`;
     tagEl.style.setProperty('--c', c);
     leaderEl.style.setProperty('--c', c);
     if (fresh) { // start at the node and spring outward
@@ -1303,7 +1400,7 @@ function updateHoverTag(t, dt) {
       tagPos.y = (1 - tagProj.y) / 2 * innerHeight;
       tagPos.vx = tagPos.vy = 0;
     }
-    emitSparks(want.anchor, 6, { speed: 1.6, size: 1.0, life: 0.7, hue: want.hue });
+    emitSparks(want.anchor, 6, { speed: 1.6, size: 1.0, life: 0.7, hue: hueOf(want) });
   }
 
   tagShow = dampTo(tagShow, tagShowV, want ? 1 : 0, want ? 11 : 14, dt);
@@ -1390,7 +1487,7 @@ function select(node, instant = false) {
       setTimeout(() => {
         if (selected !== node) return;
         fxImpact({ warpAmt: 0, shockUV: { x: 0.5, y: 0.5 } });
-        emitSparks(node.pos, 90, { speed: 7, size: 1.8, life: 1.2, hue: node.hue });
+        emitSparks(node.pos, 90, { speed: 7, size: 1.8, life: 1.2, hue: hueOf(node) });
       }, 300);
     }
   }
@@ -1476,13 +1573,13 @@ const dotTex = (() => {
   return tex;
 })();
 
-const labelTex = (() => {
+const makeLabelTex = () => {
   const c = document.createElement('canvas');
   c.width = 320; c.height = 64;
   const ctx = c.getContext('2d');
   ctx.beginPath();
   ctx.roundRect(6, 6, 308, 52, 26);
-  ctx.fillStyle = 'rgba(40, 52, 120, 0.82)';
+  ctx.fillStyle = theme.chipSoft;
   ctx.fill();
   ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)';
   ctx.lineWidth = 2;
@@ -1495,7 +1592,8 @@ const labelTex = (() => {
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   return tex;
-})();
+};
+const labelTex = makeLabelTex();
 
 const mini = (() => {
   const root = new THREE.Group();   // position / scale / lift
@@ -1505,42 +1603,65 @@ const mini = (() => {
   tilt.add(inner);
 
   const disc = new THREE.Mesh(
-    new THREE.CircleGeometry(MINI_R, 64),
+    new THREE.CircleGeometry(MINI_R * 1.15, 64), // a little larger than the bubble, so its wobbling edge has room
     new THREE.ShaderMaterial({
-      uniforms: { uHover: { value: 0 }, uZoom: { value: 0 }, uTime: timeUniform },
+      uniforms: { uHover: { value: 0 }, uZoom: { value: 0 }, uWobble: { value: 0 }, uTime: timeUniform },
       vertexShader: /* glsl */ `
         varying vec2 vUv;
         void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
       fragmentShader: /* glsl */ `
         uniform float uHover;
         uniform float uZoom;
+        uniform float uWobble;
         uniform float uTime;
         varying vec2 vUv;
+        ${NOISE_GLSL}
+
+        // Thin-film interference: light reflecting off the front and back of a soap film of thickness d (nm)
+        // interferes differently for each wavelength, so the film shows swirling spectral colours.
+        vec3 thinFilm(float d, float cosT) {
+          const vec3 lambda = vec3(650.0, 532.0, 460.0);          // red, green, blue in nm
+          const float n = 1.33;                                    // refractive index of soapy water
+          float cosR = sqrt(max(1.0 - (1.0 - cosT * cosT) / (n * n), 0.0));
+          vec3 phase = 4.0 * 3.14159265 * n * d * cosR / lambda;
+          return 0.5 + 0.5 * cos(phase + 3.14159265);              // half-wave phase flip on the front surface
+        }
+
         void main() {
-          vec2 p = (vUv - 0.5) * 2.0;
-          float r = length(p);
+          vec2 p = (vUv - 0.5) * 2.0 * 1.15;
+          float ang = atan(p.y, p.x);
+
+          // the silhouette wobbles like a bubble after it has been poked, driven by uWobble
+          float w = uWobble;
+          float wob = 1.0 + w * (0.05 * sin(2.0 * ang + uTime * 3.1) + 0.035 * sin(3.0 * ang - uTime * 4.3) + 0.02 * sin(5.0 * ang + uTime * 6.2));
+          float r = length(p) / wob;
           float aa = max(fwidth(r), 1e-4);
           float mask = 1.0 - smoothstep(1.0 - aa, 1.0, r);
-          vec3 col = mix(vec3(0.10, 0.14, 0.34), vec3(0.30, 0.40, 0.88), smoothstep(1.0, 0.0, r) * 0.55 + 0.25 * uHover);
-          float a = 0.52 + 0.20 * uHover;
+          if (mask <= 0.0) discard;
 
-          vec2 dir = p / max(r, 1e-4);
-          float lit = dot(dir, normalize(vec2(-0.6, 0.8)));
-          float rim = exp(-(1.0 - r) * 20.0);
-          col += rim * (0.45 + 0.65 * max(lit, 0.0));
-          a += rim * 0.5;
+          // treat the disc as a sphere: the viewing angle at each point sets how the film reflects
+          float z = sqrt(max(1.0 - r * r, 0.0));
+          float cosT = clamp(z, 0.03, 1.0);
 
-          float film = exp(-pow((1.0 - r - 0.07) / 0.035, 2.0));
-          vec3 irid = 0.5 + 0.5 * cos(6.2831 * (atan(p.y, p.x) / 6.2831 - uTime * 0.08 + vec3(0.0, 0.33, 0.67)));
-          col += irid * film * (0.35 + 0.5 * uHover);
+          // film thickness: flowing swirls that drain toward the bottom, and thin out as you zoom in
+          // (so the colours sweep through the spectrum while you scroll)
+          vec3 q = vec3(p * 1.4, uTime * (0.09 + 0.5 * w));
+          float swirl = fbm(q + 2.2 * vec3(fbm(q + 5.0), fbm(q + 9.0), 0.0));
+          float d = (240.0 + 420.0 * swirl + 240.0 * (0.5 - 0.5 * p.y)) * (1.0 - 0.5 * uZoom);
+          vec3 film = thinFilm(d, cosT);
 
-          float orbit = exp(-pow((r - 0.62) / 0.014, 2.0)) * (0.5 + 0.5 * sin(atan(p.y, p.x) * 22.0 + uTime * 0.8));
-          col += orbit * 0.18;
+          float fres = pow(1.0 - cosT, 2.4);                       // glancing angles reflect far more
+          float rim = exp(-(1.0 - r) * 26.0);
+          vec3 col = film * (0.22 + 1.25 * fres) + film * rim * 0.9 + vec3(rim * 0.22);
 
-          vec2 sp = p - vec2(-0.45, 0.5);
-          col += exp(-dot(sp, sp) * 7.0) * (0.22 + 0.35 * uHover);
+          // soft window reflections, as on a real bubble
+          float hl = exp(-pow(length(p - vec2(-0.42, 0.46)) / 0.17, 2.0));
+          float hl2 = exp(-pow(length(p - vec2(0.46, -0.52)) / 0.09, 2.0));
+          col += vec3(1.0) * (hl * 0.85 + hl2 * 0.45);
 
-          a *= 1.0 - 0.45 * uZoom;  // more see-through when zoomed in, so the beads and labels read clearly
+          // nearly clear in the middle (so the beads read), solid-looking at the rim
+          float a = 0.16 + 0.10 * uHover + fres * 0.85 + rim * 0.35 + hl * 0.55 + hl2 * 0.3;
+          a *= 1.0 - 0.35 * uZoom;
           gl_FragColor = vec4(col, clamp(a, 0.0, 1.0) * mask);
           #include <colorspace_fragment>
         }`,
@@ -1614,7 +1735,7 @@ function chipTexture(title) {
     const w = Math.min(308, ctx.measureText(title).width + 36);
     ctx.beginPath();
     ctx.roundRect(160 - w / 2, 6, w, 52, 26);
-    ctx.fillStyle = 'rgba(24, 32, 84, 0.86)';
+    ctx.fillStyle = theme.chip;
     ctx.fill();
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
     ctx.lineWidth = 2;
@@ -1631,11 +1752,13 @@ function chipTexture(title) {
 }
 
 // Rebuild the little constellation for `node` and attach the widget to its page
-function setupMini(node) {
-  if (mini.owner === node) return;
+function setupMini(node, rebuild = false) { // rebuild: same page, new look (theme change), keep the bubble's state
+  if (mini.owner === node && !rebuild) return;
   mini.owner?.mesh.remove(mini.root, mini.shadow);
   node.mesh.add(mini.root, mini.shadow);
   mini.owner = node;
+  // a fresh bubble on the new page: it starts empty-handed and blows itself up from nothing
+  if (!rebuild) mini.show = mini.showV = mini.hover = mini.hoverV = mini.wobble = 0;
 
   for (const ch of [...mini.inner.children]) {
     mini.inner.remove(ch);
@@ -1660,13 +1783,13 @@ function setupMini(node) {
   const lineGeoMini = new THREE.BufferGeometry();
   lineGeoMini.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
   mini.lines = new THREE.LineSegments(lineGeoMini, new THREE.LineBasicMaterial({
-    color: 0xa9c1ff, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthTest: false, depthWrite: false,
+    color: new THREE.Color(theme.miniLine), transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthTest: false, depthWrite: false,
   }));
   mini.lines.renderOrder = 6;
   mini.inner.add(mini.lines);
 
   for (const [n, p] of pos) {
-    const color = n === node ? new THREE.Color(1, 1, 1) : new THREE.Color().setHSL(n.hue, 0.85, 0.66);
+    const color = n === node ? new THREE.Color(1, 1, 1) : new THREE.Color().setHSL(hueOf(n), 0.85, 0.66);
     const spriteMat = (map) => new THREE.SpriteMaterial({
       map, color, transparent: true, depthTest: false, depthWrite: false, blending: THREE.AdditiveBlending,
     });
@@ -1733,9 +1856,31 @@ function enterGraph() {
   backBtn.hidden = false;
   controls.autoRotate = true;
   flyTo(center.pos, R * 1.5 + 3.2);
+  mini.root.getWorldPosition(beadPos); // the bubble pops: iridescent droplets fly out of it
+  emitSparks(beadPos, 55, { speed: 3.2, size: 1.1, life: 0.9, hue: 0.5, sat: 0.9, white: 0.5 });
+  emitSparks(beadPos, 55, { speed: 3.2, size: 1.1, life: 0.9, hue: 0.88, sat: 0.9, white: 0.5 });
   fxImpact({ warpAmt: 1, flashAmt: 0.3, shockUV: { x: 0.5, y: 0.5 } }); // bigger bang for the graph
-  emitSparks(center.pos, 220, { speed: 9, size: 1.6, life: 1.5, hue: center.hue });
+  emitSparks(center.pos, 220, { speed: 9, size: 1.6, life: 1.5, hue: hueOf(center) });
   setHint('<b>Drag</b> orbit &nbsp;·&nbsp; <b>Hover</b> a note to trace its links &nbsp;·&nbsp; <b>Click</b> a note to open it &nbsp;·&nbsp; <b>Esc</b> back to the page');
+}
+
+// Clicking a node inside the zoomed bubble bursts it: iridescent droplets fly out from the bubble and from
+// the node you picked, the view jolts, and the camera carries you to that note.
+function popBubbleTo(node) {
+  const burst = (origin, count) => {
+    emitSparks(origin, count, { speed: 4.2, size: 1.2, life: 1.0, hue: 0.5, sat: 0.9, white: 0.5 });
+    emitSparks(origin, count, { speed: 4.2, size: 1.2, life: 1.0, hue: 0.88, sat: 0.9, white: 0.5 });
+    emitSparks(origin, count, { speed: 4.2, size: 1.2, life: 1.0, hue: 0.12, sat: 0.9, white: 0.5 });
+  };
+  mini.root.getWorldPosition(beadPos);
+  burst(beadPos, 40);
+  const bead = mini.beads.find((b) => b.node === node);
+  if (bead) {
+    bead.soft.getWorldPosition(beadPos);
+    burst(beadPos, 55);
+  }
+  fxImpact({ warpAmt: 0.5, flashAmt: 0.25 });
+  select(node);
 }
 
 function exitGraph() {
@@ -1818,7 +1963,7 @@ renderer.domElement.addEventListener('pointerup', (e) => {
     return;
   }
   if (onMini) {
-    if (bead) select(bead);                // zoomed in: a bead opens its note
+    if (bead) popBubbleTo(bead);           // zoomed in: a bead bursts the bubble and takes you to its note
     else if (mz < 0.25) enterGraph();      // a plain click on the widget opens the isolated graph
   }
   else if (link) select(link);
@@ -1836,7 +1981,7 @@ function emitTrail(e) {
   camera.getWorldDirection(trailDir);
   trailPlane.setFromNormalAndCoplanarPoint(trailDir, trailAnchor.copy(camera.position).addScaledVector(trailDir, 9));
   if (ray.ray.intersectPlane(trailPlane, trailPoint)) {
-    emitSparks(trailPoint, 2, { speed: 0.9, size: 0.8, life: 0.8, hue: 0.58 + Math.random() * 0.2, sat: 0.8, white: 0.55 });
+    emitSparks(trailPoint, 2, { speed: 0.9, size: 0.8, life: 0.8, hue: theme.trailHue[0] + Math.random() * theme.trailHue[1], sat: 0.8, white: 0.55 });
   }
 }
 
@@ -1876,8 +2021,7 @@ renderer.domElement.addEventListener('wheel', (e) => {
     e.preventDefault();
     e.stopImmediatePropagation();
     const dy = e.deltaY * (e.deltaMode === 1 ? 40 : 1);
-    if (dy < 0 && mzGoal >= 0.999) enterGraph(); // keep pushing in and you arrive in the full graph
-    else mzGoal = THREE.MathUtils.clamp(mzGoal - dy * 0.0016, 0, 1);
+    mzGoal = THREE.MathUtils.clamp(mzGoal - dy * 0.0016, 0, 1); // capped: scrolling past the maximum does nothing
     return;
   }
   if (node !== selected) return;
@@ -1965,6 +2109,56 @@ for (const n of nodes) {
 
 // ---------- Loop ----------
 
+// ---------- Theme switching ----------
+
+const themeBtns = [...document.querySelectorAll('#themes button')];
+const markTheme = () => themeBtns.forEach((b) => b.classList.toggle('on', b.dataset.theme === themeName));
+markTheme();
+
+function setTheme(name) {
+  if (!THEMES[name] || name === themeName) return;
+  themeName = name;
+  theme = THEMES[name];
+  setThemeGoals(theme); // shader colours and the page chrome ease over by themselves
+  try { localStorage.setItem('kg-theme', name); } catch { /* storage blocked */ }
+  markTheme();
+
+  // anything with colour painted into a texture is redrawn in the new palette
+  const blurFor = { soft: 2.5, heavy: 5 };
+  for (const n of nodes) {
+    if (n.state === 'tile') setPanelTexture(n, drawTile(n));
+    else if (n.detailed) setPanelTexture(n, drawPanel(n, true, 0, n.scroll || 0));
+    else setPanelTexture(n, drawPanel(n, false, blurFor[n.state] ?? 0));
+    const u = n.mesh.material.uniforms;
+    u.uMap2.value?.dispose();
+    u.uMap2.value = drawFace(n);
+  }
+  chipCache.clear();
+  mini.label.material.map?.dispose();
+  mini.label.material.map = makeLabelTex();
+  mini.label.material.needsUpdate = true;
+  if (mini.owner) setupMini(mini.owner, true);
+  tagNode = null;
+
+  // a change of scenery deserves a little ceremony
+  fxImpact({ warpAmt: 0.9, flashAmt: 0.3, shockUV: { x: 0.5, y: 0.5 } });
+  emitSparks(controls.target, 120, { speed: 8, size: 1.5, life: 1.3, hue: theme.trailHue[0] + 0.08, white: 0.4 });
+}
+
+themeBtns.forEach((b) => b.addEventListener('click', () => setTheme(b.dataset.theme)));
+addEventListener('keydown', (e) => {
+  if (e.key.toLowerCase() === 't' && !e.metaKey && !e.ctrlKey && !e.altKey) {
+    const names = Object.keys(THEMES);
+    setTheme(names[(names.indexOf(themeName) + 1) % names.length]);
+  }
+});
+
+function stepTheme(dt) {
+  const k = 1 - Math.exp(-dt * 3.5);
+  for (const key in T) T[key].lerp(G[key], k);
+  bloom.strength = T.nums.y;
+}
+
 const startMs = performance.now();
 let lastT = 0;
 
@@ -1973,6 +2167,7 @@ renderer.setAnimationLoop(() => {
   const dt = Math.min(0.05, t - lastT);
   lastT = t;
   timeUniform.value = t;
+  stepTheme(dt);
   sky.position.copy(camera.position); // the sky has no parallax
 
   if (flying) {
@@ -2070,7 +2265,7 @@ renderer.setAnimationLoop(() => {
     mini.root.visible = mini.shadow.visible = mini.show > 0.01;
     const calm = 1 - THREE.MathUtils.smoothstep(mz, 0.02, 0.4); // 1 at rest, 0 once you have scrolled in a little
     const px = MINI_X * (1 - z), py = MINI_Y * (1 - z) + Math.sin(t * 1.6) * 0.006 * (1 + 2 * e) * calm;
-    const grow = mini.show * (1 + 0.6 * e) * (1 + 5.0 * z);
+    const grow = mini.show * (1 + 0.6 * e) * (1 + 3.4 * z);
     mini.root.position.set(px, py, 0.03 + 0.34 * e + 0.5 * z);
     mini.root.scale.setScalar(grow);
     // everything holds still once you are zooming: no cursor-following tilt, no spin, no bob
@@ -2085,6 +2280,13 @@ renderer.setAnimationLoop(() => {
     mini.inner.updateMatrix();
     mini.disc.material.uniforms.uHover.value = e;
     mini.disc.material.uniforms.uZoom.value = z;
+
+    // bubble physics: any sudden change (hover, zoom, a drag) sets the film wobbling, and it rings down slowly
+    const energy = Math.min(1.4, Math.abs(mini.hoverV || 0) * 0.5 + Math.abs(mzV) * 1.2 + miniSpin.length() * 0.04 + (miniDrag ? 0.45 : 0));
+    mini.wobble = Math.max((mini.wobble || 0) * Math.exp(-dt * 1.6), energy);
+    mini.disc.material.uniforms.uWobble.value = mini.wobble;
+    const squash = 0.06 * mini.wobble * Math.sin(t * 9); // jelly-like squash and stretch
+    mini.tilt.scale.set(1 + squash, 1 - squash, 1);
     mini.lines.material.opacity = 0.32 + 0.45 * e + 0.2 * z;
     mini.label.material.opacity = e * (1 - THREE.MathUtils.smoothstep(mz, 0.0, 0.12)); // gone as soon as you zoom in
     mini.shadow.position.set(px + 0.06 * e, py - 0.08 * e, 0.012); // drifts away as it lifts
