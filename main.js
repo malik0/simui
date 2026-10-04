@@ -287,6 +287,7 @@ camera.position.copy(HOME_DIR).multiplyScalar(HOME_DIST);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+const pxUniform = { value: renderer.getPixelRatio() }; // read by the point-sprite shaders, which size in device pixels
 renderer.setSize(innerWidth, innerHeight);
 document.body.appendChild(renderer.domElement);
 
@@ -366,9 +367,12 @@ const sky = new THREE.Mesh(
         col *= 0.85 + 0.25 * smoothstep(-0.8, 0.8, d.y);
 
         // god rays: shafts of light falling through a canopy, drifting slowly (forest theme only)
-        float azimuth = atan(d.x, d.z);
-        float shafts = pow(fbm(vec3(azimuth * 2.6, uTime * 0.05, 4.0)), 3.0);
-        col += uRayColor * uNums.x * shafts * 2.4 * smoothstep(0.02, 0.95, d.y);
+        if (uNums.x > 0.001) { // (skipped, along with its noise lookup, in the other themes)
+          float azimuth = atan(d.x, d.z);
+          // (walked round a circle in noise space rather than along the raw angle, which jumps where atan wraps, dead ahead of the rail camera)
+          float shafts = pow(fbm(vec3(cos(azimuth), sin(azimuth), 0.0) * 2.6 + vec3(0.0, 0.0, uTime * 0.05 + 4.0)), 3.0);
+          col += uRayColor * uNums.x * shafts * 2.4 * smoothstep(0.02, 0.95, d.y);
+        }
 
         gl_FragColor = vec4(col, 1.0);
         #include <colorspace_fragment>
@@ -378,9 +382,9 @@ const sky = new THREE.Mesh(
     depthTest: false,
   }),
 );
-sky.renderOrder = -10;
 sky.frustumCulled = false;
-scene.add(sky);
+const skyScene = new THREE.Scene(); // drawn on its own, at half resolution (see skyRT below)
+skyScene.add(sky);
 
 // Twinkling, soft round dust for depth cues
 {
@@ -400,7 +404,7 @@ scene.add(sky);
   scene.add(new THREE.Points(g, new THREE.ShaderMaterial({
     // stars in the nebula, drifting fireflies in the forest: same particles, different colour / twinkle / wander
     uniforms: {
-      uTime: timeUniform, uPx: { value: renderer.getPixelRatio() },
+      uTime: timeUniform, uPx: pxUniform,
       uDust: { value: T.dust }, uNums: { value: T.nums }, uNums2: { value: T.nums2 },
     },
     vertexShader: /* glsl */ `
@@ -456,7 +460,7 @@ sparkGeo.setAttribute('aLife', new THREE.BufferAttribute(sparkLife, 1).setUsage(
 sparkGeo.setAttribute('aSize', new THREE.BufferAttribute(sparkSize, 1).setUsage(THREE.DynamicDrawUsage));
 sparkGeo.setAttribute('aColor', new THREE.BufferAttribute(sparkColor, 3).setUsage(THREE.DynamicDrawUsage));
 const sparks = new THREE.Points(sparkGeo, new THREE.ShaderMaterial({
-  uniforms: { uTime: timeUniform, uPx: { value: renderer.getPixelRatio() } },
+  uniforms: { uTime: timeUniform, uPx: pxUniform },
   vertexShader: /* glsl */ `
     attribute vec3 aVel;
     attribute float aBirth;
@@ -527,6 +531,18 @@ const dbSize = new THREE.Vector2();
 const rtScene = new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType });
 const rtA = new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType, depthBuffer: false });
 const rtB = new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType, depthBuffer: false });
+// The sky is smooth, slow-moving cloud but costs about seven layers of noise per pixel, so it is drawn at half resolution
+// into its own target and stretched over the frame by a full-screen quad; bilinear filtering hides the lower resolution.
+const skyRT = new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType, depthBuffer: false });
+const skyQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
+  uniforms: { tSky: { value: skyRT.texture } },
+  vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
+  fragmentShader: 'uniform sampler2D tSky; varying vec2 vUv; void main() { gl_FragColor = texture2D(tSky, vUv); }',
+  depthTest: false, depthWrite: false,
+}));
+skyQuad.renderOrder = -10;
+skyQuad.frustumCulled = false;
+scene.add(skyQuad);
 
 const shared = { // uniforms shared by every panel's material
   uBackdrop: { value: rtB.texture },
@@ -542,6 +558,7 @@ const shared = { // uniforms shared by every panel's material
 function resizeTargets() {
   renderer.getDrawingBufferSize(dbSize);
   shared.uRes.value.copy(dbSize);
+  skyRT.setSize(Math.max(2, dbSize.x >> 1), Math.max(2, dbSize.y >> 1));
   rtScene.setSize(Math.max(2, dbSize.x >> 1), Math.max(2, dbSize.y >> 1));
   rtA.setSize(Math.max(2, dbSize.x >> 2), Math.max(2, dbSize.y >> 2));
   rtB.setSize(Math.max(2, dbSize.x >> 2), Math.max(2, dbSize.y >> 2));
@@ -581,6 +598,7 @@ function blurPass(src, dst, dx, dy) {
   renderer.render(blurScene, blurCam);
 }
 
+let backdropOwner = null, backdropTick = 0;
 function renderBackdrop(page) {
   page.mesh.visible = false;
   page.icon.visible = false;
@@ -663,15 +681,19 @@ function makeGlassMaterial() {
 
         // frosted body: the blurred scene behind, bent at the rim like thick glass, with
         // each colour channel bent a little differently (chromatic dispersion)
-        vec2 suv = gl_FragCoord.xy / uRes;
-        vec2 bend = -dir * exp(-inner * 8.0) * 0.032 * vec2(uRes.y / uRes.x, 1.0);
-        vec3 back = vec3(
-          texture2D(uBackdrop, suv + bend * 1.35).r,
-          texture2D(uBackdrop, suv + bend).g,
-          texture2D(uBackdrop, suv + bend * 0.65).b);
-        float luma = dot(back, vec3(0.299, 0.587, 0.114));
-        back = mix(vec3(luma), back, 1.5);                   // lift saturation, like vibrancy
-        vec3 frost = back * 0.84 + uFrost;
+        // (only the open page uses the live blur, so every other panel skips these three texture reads)
+        vec3 frost = vec3(0.0);
+        if (uBackdropMix > 0.001) {
+          vec2 suv = gl_FragCoord.xy / uRes;
+          vec2 bend = -dir * exp(-inner * 8.0) * 0.032 * vec2(uRes.y / uRes.x, 1.0);
+          vec3 back = vec3(
+            texture2D(uBackdrop, suv + bend * 1.35).r,
+            texture2D(uBackdrop, suv + bend).g,
+            texture2D(uBackdrop, suv + bend * 0.65).b);
+          float luma = dot(back, vec3(0.299, 0.587, 0.114));
+          back = mix(vec3(luma), back, 1.5);                 // lift saturation, like vibrancy
+          frost = back * 0.84 + uFrost;
+        }
 
         // light pane for panels that are not backed by the live blur
         vec3 pane = uPane;
@@ -717,8 +739,8 @@ function makeGlassMaterial() {
         col += grain * 0.03 * (0.4 + uBackdropMix);
 
         // content (text, tags, image) painted on top
-        vec4 t1 = texture2D(uMap, vUv);
-        vec4 t2 = texture2D(uMap2, vUv);
+        vec4 t1 = uLod < 0.999 ? texture2D(uMap, vUv) : vec4(0.0);   // a panel is mostly one or the other, so skip the unused read
+        vec4 t2 = uLod > 0.001 ? texture2D(uMap2, vUv) : vec4(0.0);
         vec4 pm = mix(vec4(t1.rgb * t1.a, t1.a), vec4(t2.rgb * t2.a, t2.a), uLod);   // cross-fade card <-> icon (premultiplied)
         vec4 t = vec4(pm.a > 0.001 ? pm.rgb / pm.a : vec3(0.0), pm.a);
         t.a *= 1.0 - uDim * 0.9;
@@ -2711,6 +2733,43 @@ addEventListener('keydown', (e) => {
   if (step && selected) { e.preventDefault(); scrollPage(step); }
 });
 
+// ---------- Adaptive resolution ----------
+// Full pixel ratio (up to 2x) is kept for as long as the GPU keeps up. If frames stay slow the render scale steps down a
+// quarter at a time (down to 0.75x), and it steps back up after a long stretch of smooth frames, backing off if that fails.
+// ?adaptive=0 turns it off.
+const ADAPT = new URLSearchParams(location.search).get('adaptive') !== '0';
+const PX_MAX = renderer.getPixelRatio(), PX_MIN = Math.min(PX_MAX, 0.75);
+const quality = { px: PX_MAX, ema: 16.7, slow: 0, smooth: 0, upFrames: 1200, lastDown: 0, lastUp: 0 };
+function setRenderScale(px) {
+  quality.px = px;
+  renderer.setPixelRatio(px);
+  pxUniform.value = px;
+  renderer.setSize(innerWidth, innerHeight);
+  resizeTargets();
+  composer.setPixelRatio(px);
+  composer.setSize(innerWidth, innerHeight);
+  quality.slow = quality.smooth = 0;
+  quality.ema = 16.7;
+  console.info(`render scale ${px}x`);
+}
+function adaptQuality(frameSecs, now) {
+  if (!ADAPT || now < 4 || frameSecs <= 0 || frameSecs > 0.25) return; // not while loading; a stall (tab switch, upload) says nothing about speed
+  quality.ema += (frameSecs * 1000 - quality.ema) * 0.06;
+  if (quality.ema > 24 && quality.px > PX_MIN) {
+    if (++quality.slow > 45) {
+      if (now - quality.lastUp < 15) quality.upFrames = Math.min(quality.upFrames * 2, 14400); // stepping up just failed: wait longer next time
+      quality.lastDown = now;
+      setRenderScale(Math.max(PX_MIN, quality.px - 0.25));
+    }
+  } else quality.slow = 0;
+  if (quality.ema < 18 && quality.px < PX_MAX) {
+    if (++quality.smooth > quality.upFrames) {
+      quality.lastUp = now;
+      setRenderScale(Math.min(PX_MAX, quality.px + 0.25));
+    }
+  } else quality.smooth = 0;
+}
+
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
@@ -3141,11 +3200,12 @@ let modesShown = false;
 
 renderer.setAnimationLoop(() => {
   const t = (performance.now() - startMs) / 1000;
-  const dt = Math.min(0.05, t - lastT);
+  const frameSecs = t - lastT;
+  const dt = Math.min(0.05, frameSecs);
   lastT = t;
+  adaptQuality(frameSecs, t);
   timeUniform.value = t;
   stepTheme(dt);
-  sky.position.copy(camera.position); // the sky has no parallax
 
   if (flying) {
     flightT = Math.min(1, flightT + dt / flightDur);
@@ -3245,7 +3305,7 @@ renderer.setAnimationLoop(() => {
     u.uDim.value = n === selected ? (mini.zoomE || 0) : 0;
     u.uHide.value = n === selected ? paperShow : 0; // the glass gives way to paper in page view
     u.uBackdropMix.value = THREE.MathUtils.lerp(u.uBackdropMix.value, n === selected && n.detailed ? 1 : 0, 0.1);
-    n.icon.visible = m.visible = u.uOpacity.value > 0.01 || n.opacityGoal > 0.01; // fully faded notes are neither drawn nor pickable
+    n.icon.visible = m.visible = u.uOpacity.value > 0.01 || og > 0.01; // fully faded notes are neither drawn nor pickable
   }
 
   bookStep(t, dt);
@@ -3408,7 +3468,15 @@ renderer.setAnimationLoop(() => {
     tetherGeo.attributes.aVis.needsUpdate = true;
   }
 
-  if (selected?.detailed && paperShow < 0.98) renderBackdrop(selected); // blurred copy of everything behind the glass page
+  // the half-resolution sky, drawn last so it uses this frame's camera and never lags behind the panels
+  sky.position.copy(camera.position); // the sky has no parallax
+  renderer.setRenderTarget(skyRT);
+  renderer.render(skyScene, camera);
+  renderer.setRenderTarget(null);
+
+  if (selected?.detailed && paperShow < 0.98) { // blurred copy of everything behind the glass page: it is heavily blurred and slow-moving, so every other frame is enough
+    if (backdropOwner !== selected || (backdropTick++ & 1) === 0) { renderBackdrop(selected); backdropOwner = selected; }
+  }
   // VFX decay, then the whole frame goes through bloom + the lens pass
   warp *= Math.exp(-dt * 3.2);
   flash *= Math.exp(-dt * 5);
