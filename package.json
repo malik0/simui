@@ -9,7 +9,7 @@
     "news": "node scripts/fetch-news.mjs",
     "build": "vite build",
     "preview": "vite preview",
-    "splats": ".sharp/venv/Scripts/python.exe scripts/make-splats.py"
+    "splats": ".sharp/venv/Scripts/python.exe scripts/make-splats.py && node scripts/compress-splats.mjs"
   },
   "keywords": [],
   "author": "",

@@ -33,4 +33,3 @@ Thumbs.db
 # SHARP experiment (venv, model weights, outputs)
 .sharp/
 experiments/splats/
-database-news/splats/

@@ -100,12 +100,12 @@ await Promise.all(nodes.filter((n) => n.image).map(async (n) => {
   }
 }));
 
-// SHARP splats (npm run splats): database-news/splats/<same name as the photo>.ply. Fetched lazily, only when a story is read.
-const splatLoaders = import.meta.glob('./database*/splats/*.ply', { query: '?url', import: 'default' });
+// SHARP splats (npm run splats): splats/<same name as the photo>.spz, compressed and committed to git. Fetched lazily, only when a story is read.
+const splatLoaders = import.meta.glob('./splats/*.spz', { query: '?url', import: 'default' });
 for (const n of nodes) {
   if (!n.image || n.image.src.endsWith('.svg')) continue;
   const file = n.image.src.split('/').pop();
-  const key = `./${DIR}/splats/${file.slice(0, file.lastIndexOf('.'))}.ply`;
+  const key = `./splats/${file.slice(0, file.lastIndexOf('.'))}.spz`;
   if (splatLoaders[key]) n.splatKey = key;
 }
 

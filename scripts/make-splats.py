@@ -3,7 +3,10 @@
     npm run splats
 
 Runs inside the SHARP virtual environment (.sharp/venv, see .sharp/ml-sharp). The model loads once and photos that
-already have a splat are skipped, so it is safe to re-run after `npm run news`. Output: database-news/splats/<name>.ply
+already have a splat are skipped, so it is safe to re-run after `npm run news`.
+
+SHARP writes big PLY files (~66 MB each) to .sharp/ply (git-ignored working cache); scripts/compress-splats.mjs then turns
+them into ~12 MB SPZ files in splats/ (committed, and outside database-news/ so `npm run news` never deletes them).
 
 Licence note: the SHARP model weights are for research use only (see .sharp/ml-sharp/LICENSE_MODEL).
 """
@@ -24,7 +27,8 @@ from sharp.utils.gaussians import save_ply
 
 ROOT = Path(__file__).resolve().parent.parent
 IMAGES = ROOT / "database-news" / "images"
-OUT = ROOT / "database-news" / "splats"
+OUT = ROOT / ".sharp" / "ply"
+DONE = ROOT / "splats"
 
 logging.basicConfig(level=logging.WARNING)
 
@@ -32,7 +36,7 @@ logging.basicConfig(level=logging.WARNING)
 def main() -> int:
     OUT.mkdir(parents=True, exist_ok=True)
     photos = sorted(p for p in IMAGES.iterdir() if p.suffix.lower() == ".jpg")
-    todo = [p for p in photos if not (OUT / f"{p.stem}.ply").exists()]
+    todo = [p for p in photos if not (OUT / f"{p.stem}.ply").exists() and not (DONE / f"{p.stem}.spz").exists()]
     print(f"{len(photos)} photos, {len(todo)} still need a splat", flush=True)
     if not todo:
         return 0
