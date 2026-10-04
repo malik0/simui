@@ -9,6 +9,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { createMedalInfographic } from './infographics.js';
 
 // ---------- Load and parse the markdown database ----------
 
@@ -2649,7 +2650,7 @@ renderer.domElement.addEventListener('pointerup', (e) => {
     else if (u < 0.28) startTurn(-1);
   }
   else if (node && node !== selected) select(node);
-  else if (!node && selected) select(null);
+  else if (!node && selected && !infoClick(e)) select(null); // (a click on a floating infographic is not a click on empty space)
 });
 // Sparkle trail: a couple of tiny sparks fall off the cursor as it moves, on a plane in front of the camera
 let lastTrail = null;
@@ -2687,7 +2688,7 @@ renderer.domElement.addEventListener('pointermove', (e) => {
   else if (node) node.mesh.material.uniforms.uPointer.value.copy(uv); // the glass lights up under the cursor
   const onPaper = node === selected && readMode === 'page' && paperShow > 0.5 && !graphMode;
   renderer.domElement.style.cursor = onMini ? (bead ? 'pointer' : 'grab')
-    : link || video ? 'pointer' : onPaper ? 'grab'
+    : link || video || infoHover ? 'pointer' : onPaper ? 'grab'
     : node && (node !== selected || graphMode) ? 'pointer' : 'default';
 });
 
@@ -3352,6 +3353,52 @@ if (layoutMode === 'rail') {
   camera.position.copy(controls.target).addScaledVector(RAIL_DIR, railDist(groups[0]));
 }
 
+// ---------- 3D infographics attached to stories ----------
+// A story can carry a 3D infographic (see infographics.js) that floats beside its page while it is open. They are matched by
+// headline because the news notes are regenerated from the feed; each one is built the first time its story opens.
+const INFOGRAPHICS = [
+  { match: /^Bahrain tops Arab nations at Asian Games/i, create: createMedalInfographic },
+];
+for (const n of nodes) {
+  const def = INFOGRAPHICS.find((d) => d.match.test(n.title));
+  if (def) n.infographic = { create: def.create, live: null, show: 0 };
+}
+const infoRay = new THREE.Raycaster();
+const INFO_OFFSET = new THREE.Vector3(-4.1, -1.3, 1.3); // left of the open page, in front of the notes around it
+const INFO_SCALE = 0.6;
+let infoHover = false;
+
+const openInfographic = () => (selected?.infographic?.live && selected.infographic.show > 0.3 && !graphMode ? selected.infographic.live : null);
+function infoPointer(e) {
+  infoRay.setFromCamera(pointer.set((e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1), camera);
+  return infoRay;
+}
+function infoClick(e) {
+  const live = openInfographic();
+  return !!live && live.click(infoPointer(e));
+}
+renderer.domElement.addEventListener('pointermove', (e) => {
+  const live = openInfographic();
+  infoHover = live ? live.hover(infoPointer(e)) : false;
+}, true);
+
+function updateInfographics(dt, t) {
+  for (const n of nodes) {
+    const i = n.infographic;
+    if (!i) continue;
+    const want = n === selected && n.detailed && !graphMode && !(mz > 0.05) ? 1 : 0; // hidden on the related-notes screens
+    i.show += (want - i.show) * (1 - Math.exp(-dt * 5));
+    if (!want && i.show < 0.004) { i.show = 0; if (i.live) { i.live.hover(null); i.live.update(dt, t, 0); } continue; }
+    if (!i.live) {
+      i.live = i.create({ accent: T.accent, reduceMotion: () => settings.reduceMotion, scale: INFO_SCALE });
+      scene.add(i.live.group);
+    }
+    i.live.group.position.copy(n.mesh.position).add(INFO_OFFSET);
+    i.live.update(dt, t, i.show);
+  }
+  if (!selected?.infographic) infoHover = false;
+}
+
 // Deep link: index.html#Three.js opens that note straight away
 {
   const target = byTitle.get(decodeURIComponent(location.hash.slice(1)).toLowerCase());
@@ -3532,6 +3579,7 @@ renderer.setAnimationLoop(() => {
   }
 
   bookStep(t, dt);
+  updateInfographics(dt, t);
   const showModes = !!(selected?.detailed && !graphMode);
   if (showModes !== modesShown) { modesShown = showModes; modesEl.classList.toggle('show', showModes); if (!showModes) fitEl.classList.remove('on'); }
 
