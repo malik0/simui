@@ -8,7 +8,8 @@
     "dev": "vite",
     "news": "node scripts/fetch-news.mjs",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "splats": ".sharp/venv/Scripts/python.exe scripts/make-splats.py"
   },
   "keywords": [],
   "author": "",

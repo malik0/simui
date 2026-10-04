@@ -116,6 +116,10 @@
       #themes { right: 18px; top: 14px; }
       #fs { display: grid; place-items: center; width: 30px; height: 30px; padding: 0 !important; margin-left: 2px; }
       #fs svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+      #bgphoto { display: none; place-items: center; width: 30px; height: 30px; padding: 0 !important; margin-left: 2px; }
+      #modes[data-mode="page"] #bgphoto.avail { display: grid; }
+      #bgphoto svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+      #bgphoto.on { opacity: 1 !important; background: var(--tint, rgba(70, 90, 210, 0.35)) !important; }
       #fs .shrink, #fs.on .grow { display: none; }
       #fs.on .shrink { display: block; }
       /* reading mode: only present while a note is open */
@@ -147,7 +151,7 @@
     <div id="crumb" class="glass">Knowledge Space</div>
     <button id="back" class="glass" hidden>&#8249; Back to page</button>
     <div id="themes" class="glass"><button data-theme="nebula">Nebula</button><button data-theme="forest">Forest</button><button data-theme="eclipse">Eclipse</button></div>
-    <div id="modes" class="glass"><button data-mode="scroll">Scroll</button><button data-mode="page">Page</button><span id="pageno"></span><button type="button" id="fs" aria-label="Fit page to screen height" title="Fit page to screen"><svg class="grow" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg><svg class="shrink" viewBox="0 0 24 24"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg></button></div>
+    <div id="modes" class="glass"><button data-mode="scroll">Scroll</button><button data-mode="page">Page</button><span id="pageno"></span><button type="button" id="fs" aria-label="Fit page to screen height" title="Fit page to screen"><svg class="grow" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg><svg class="shrink" viewBox="0 0 24 24"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg></button><button type="button" id="bgphoto" aria-label="Photo background" title="Photo background: show this story’s photo as a 3D scene behind the page"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><circle cx="9" cy="10" r="1.6"/><path d="M21 16l-5-5-8 8"/></svg></button></div>
     <button id="play" class="glass" hidden>&#9654; Play video</button>
     <div id="dataset" class="glass"><a href="?data=vr" data-data="vr">VR notes</a><a href="?data=news" data-data="news">News</a></div>
     <button id="gear" class="glass" type="button"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</button>

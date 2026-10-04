@@ -10,6 +10,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { createMedalInfographic } from './infographics.js';
+import { createSplatBackdrop } from './splatBackdrop.js';
 
 // ---------- Load and parse the markdown database ----------
 
@@ -98,6 +99,15 @@ await Promise.all(nodes.filter((n) => n.image).map(async (n) => {
     console.warn(`Could not load image: ${n.image.src}`);
   }
 }));
+
+// SHARP splats (npm run splats): database-news/splats/<same name as the photo>.ply. Fetched lazily, only when a story is read.
+const splatLoaders = import.meta.glob('./database*/splats/*.ply', { query: '?url', import: 'default' });
+for (const n of nodes) {
+  if (!n.image || n.image.src.endsWith('.svg')) continue;
+  const file = n.image.src.split('/').pop();
+  const key = `./${DIR}/splats/${file.slice(0, file.lastIndexOf('.'))}.ply`;
+  if (splatLoaders[key]) n.splatKey = key;
+}
 
 // ---------- Icons (Lucide, kept as vectors) ----------
 
@@ -280,12 +290,12 @@ setThemeGoals(theme);
 // ---------- Settings state ----------
 // (the panel that edits these, and the code that applies them, is further down)
 const SETTINGS_KEY = 'kg-settings';
-const DEFAULTS = { quality: 'auto', scale: 'auto', aa: 4, sky: 0.5, glass: 'full', bloom: true, lens: true, particles: true, reduceMotion: false, fps: false };
+const DEFAULTS = { quality: 'auto', scale: 'auto', aa: 4, sky: 0.5, glass: 'full', bloom: true, lens: true, particles: true, photoBackdrop: true, reduceMotion: false, fps: false };
 const PRESETS = {
-  auto:   { scale: 'auto',   aa: 4, sky: 0.5,  glass: 'full',    bloom: true,  lens: true,  particles: true },
-  high:   { scale: 'native', aa: 4, sky: 0.5,  glass: 'full',    bloom: true,  lens: true,  particles: true },
-  medium: { scale: 1.5,      aa: 2, sky: 0.5,  glass: 'full',    bloom: true,  lens: true,  particles: true },
-  low:    { scale: 1,        aa: 0, sky: 0.25, glass: 'reduced', bloom: false, lens: false, particles: false },
+  auto:   { scale: 'auto',   aa: 4, sky: 0.5,  glass: 'full',    bloom: true,  lens: true,  particles: true,  photoBackdrop: true },
+  high:   { scale: 'native', aa: 4, sky: 0.5,  glass: 'full',    bloom: true,  lens: true,  particles: true,  photoBackdrop: true },
+  medium: { scale: 1.5,      aa: 2, sky: 0.5,  glass: 'full',    bloom: true,  lens: true,  particles: true,  photoBackdrop: true },
+  low:    { scale: 1,        aa: 0, sky: 0.25, glass: 'reduced', bloom: false, lens: false, particles: false, photoBackdrop: false },
 };
 const settings = (() => {
   let saved = {};
@@ -558,10 +568,24 @@ const rtB = new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType, depth
 // The sky is smooth, slow-moving cloud but costs about seven layers of noise per pixel, so it is drawn at half resolution
 // into its own target and stretched over the frame by a full-screen quad; bilinear filtering hides the lower resolution.
 const skyRT = new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType, depthBuffer: false });
+// In page view the story's photo can take the sky's place: backdrop (splatBackdrop.js) draws it, with alpha, into its own
+// texture, and this quad lays it over the sky (so the sky still shows wherever the photo's 3D scene does not reach).
+const backdrop = createSplatBackdrop({ renderer });
+if (new URLSearchParams(location.search).get('debug')) window.__app = { renderer }; // ?debug=1: lets the console read renderer.info (live GPU textures etc.)
+const cursor = { x: 0, y: 0 }, cursorGoal = { x: 0, y: 0 }; // pointer position (-1..1), smoothed, for the backdrop's parallax
 const skyQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), new THREE.ShaderMaterial({
-  uniforms: { tSky: { value: skyRT.texture } },
+  uniforms: { tSky: { value: skyRT.texture }, tSplat: { value: backdrop.texture }, uSplat: { value: 0 }, uGain: { value: 0.82 } },
   vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = vec4(position.xy, 0.0, 1.0); }',
-  fragmentShader: 'uniform sampler2D tSky; varying vec2 vUv; void main() { gl_FragColor = texture2D(tSky, vUv); }',
+  fragmentShader: [
+    'uniform sampler2D tSky; uniform sampler2D tSplat; uniform float uSplat; uniform float uGain;',
+    'varying vec2 vUv;',
+    'void main() {',
+    '  vec3 sky = texture2D(tSky, vUv).rgb;',
+    '  vec4 s = texture2D(tSplat, vUv);',
+    '  vec3 withPhoto = s.rgb * uGain + sky * (1.0 - s.a);',
+    '  gl_FragColor = vec4(mix(sky, withPhoto, uSplat), 1.0);',
+    '}',
+  ].join('\n'),
   depthTest: false, depthWrite: false,
 }));
 skyQuad.renderOrder = -10;
@@ -583,6 +607,7 @@ function resizeTargets() {
   renderer.getDrawingBufferSize(dbSize);
   shared.uRes.value.copy(dbSize);
   skyRT.setSize(Math.max(2, Math.round(dbSize.x * skyScale)), Math.max(2, Math.round(dbSize.y * skyScale)));
+  backdrop.resize(dbSize.x, dbSize.y);
   rtScene.setSize(Math.max(2, Math.round(dbSize.x * 0.5 * glassScale)), Math.max(2, Math.round(dbSize.y * 0.5 * glassScale)));
   rtA.setSize(Math.max(2, Math.round(dbSize.x * 0.25 * glassScale)), Math.max(2, Math.round(dbSize.y * 0.25 * glassScale)));
   rtB.setSize(Math.max(2, Math.round(dbSize.x * 0.25 * glassScale)), Math.max(2, Math.round(dbSize.y * 0.25 * glassScale)));
@@ -2806,6 +2831,7 @@ const ADVANCED = [
   { key: 'bloom', label: 'Glow', options: [[true, 'On'], [false, 'Off']] },
   { key: 'lens', label: 'Lens & motion blur', options: [[true, 'On'], [false, 'Off']] },
   { key: 'particles', label: 'Particles', options: [[true, 'On'], [false, 'Off']] },
+  { key: 'photoBackdrop', label: 'Photo background in page view', options: [[true, 'On'], [false, 'Off']], hint: "The story's photo as a 3D scene behind the page" },
 ];
 const COMFORT = [
   { key: 'reduceMotion', label: 'Reduce motion', options: [[false, 'Off'], [true, 'On']], hint: 'No auto-rotation, floating or screen warps' },
@@ -2847,6 +2873,7 @@ function applySettings() {
   backdropEvery = s.glass === 'reduced' ? 3 : 2;
   resizeTargets();
   dustPoints.visible = sparks.visible = s.particles;
+  if (!s.photoBackdrop) backdrop.clear(); // frees the splats from memory
   fpsEl.hidden = !s.fps;
 }
 
@@ -2940,6 +2967,14 @@ function fpsStep(frameSecs, now) {
 }
 
 applySettings();
+
+// quick toggle in the page-view bar (only shown for stories that have a splat)
+const bgBtn = document.getElementById('bgphoto');
+bgBtn.addEventListener('click', () => {
+  settings.photoBackdrop = !settings.photoBackdrop;
+  settings.quality = matchPreset();
+  changed();
+});
 
 // ---------- Controls panel ----------
 // The reference for every input, kept out of the way until you want it.
@@ -3380,6 +3415,8 @@ function infoClick(e) {
 renderer.domElement.addEventListener('pointermove', (e) => {
   const live = openInfographic();
   infoHover = live ? live.hover(infoPointer(e)) : false;
+  cursorGoal.x = (e.clientX / innerWidth) * 2 - 1;
+  cursorGoal.y = -((e.clientY / innerHeight) * 2 - 1);
 }, true);
 
 function updateInfographics(dt, t) {
@@ -3738,6 +3775,17 @@ renderer.setAnimationLoop(() => {
     tetherGeo.attributes.aHot.needsUpdate = true;
     tetherGeo.attributes.aVis.needsUpdate = true;
   }
+
+  // the story's photo as a 3D backdrop while reading in page view (and only if there is a splat for it)
+  cursor.x += (cursorGoal.x - cursor.x) * (1 - Math.exp(-dt * 5));
+  cursor.y += (cursorGoal.y - cursor.y) * (1 - Math.exp(-dt * 5));
+  const photoPage = settings.photoBackdrop && readMode === 'page' && paperShow > 0.5 && selected?.detailed && !graphMode && selected.splatKey ? selected : null;
+  const photo = photoPage && images.get(photoPage.image.src);
+  backdrop.setWanted(photo ? { key: photoPage.splatKey, load: splatLoaders[photoPage.splatKey], w: photo.width, h: photo.height } : null);
+  backdrop.update(dt, t, camera, controls.target, cursor, !settings.reduceMotion);
+  skyQuad.material.uniforms.uSplat.value = backdrop.render() ? backdrop.show : 0;
+  bgBtn.classList.toggle('avail', !!selected?.splatKey);
+  bgBtn.classList.toggle('on', settings.photoBackdrop);
 
   // the half-resolution sky, drawn last so it uses this frame's camera and never lags behind the panels
   sky.position.copy(camera.position); // the sky has no parallax
