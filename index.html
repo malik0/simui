@@ -52,9 +52,43 @@
       }
       #back:hover { transform: translateX(-2px); background: linear-gradient(180deg, rgba(255, 255, 255, 0.32), rgba(255, 255, 255, 0.14)); }
       #back[hidden] { display: none; }
+      #play { left: 18px; top: 108px; pointer-events: auto; cursor: pointer; font: inherit; font-size: 13.5px; font-weight: 600; transition: transform 0.15s ease; }
+      #play:hover { transform: translateX(2px); }
+      #play[hidden] { display: none; }
+      #dataset { right: 18px; top: 62px; pointer-events: auto; display: flex; gap: 2px; padding: 4px; }
+      #dataset a { font-size: 13px; font-weight: 600; padding: 6px 14px; border-radius: 999px; color: inherit; text-decoration: none; opacity: 0.7; }
+      #dataset a:hover { opacity: 1; }
+      #layout { right: 18px; top: 110px; pointer-events: auto; display: flex; gap: 2px; padding: 4px; }
+      #layout button { font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; border: 0; border-radius: 999px; padding: 6px 14px; color: inherit; background: transparent; opacity: 0.7; }
+      #layout button:hover { opacity: 1; }
+      #layout button.on { opacity: 1; background: var(--tint, rgba(70, 90, 210, 0.35)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35); }
+      /* category pill bar (rail layout) */
+      #cats {
+        left: 50%; bottom: 64px; transform: translateX(-50%) translateY(8px); display: flex; gap: 2px; padding: 4px; max-width: 92vw; overflow-x: auto;
+        pointer-events: none; opacity: 0; visibility: hidden; transition: opacity 0.35s ease, transform 0.35s ease, visibility 0.35s;
+      }
+      #cats.show { pointer-events: auto; opacity: 1; visibility: visible; transform: translateX(-50%); }
+      #cats button { font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; border: 0; border-radius: 999px; padding: 6px 14px; color: inherit; background: transparent; opacity: 0.7; white-space: nowrap; transition: background 0.25s ease, opacity 0.25s ease; }
+      #cats button:hover { opacity: 1; }
+      #cats button.on { opacity: 1; background: var(--tint, rgba(70, 90, 210, 0.35)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35); }
+      #dataset a.on { opacity: 1; background: var(--tint, rgba(70, 90, 210, 0.35)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35); }
+      /* video overlay: a YouTube player floating above the scene */
+      #player {
+        position: fixed; inset: 0; z-index: 5; display: none; place-items: center; background: rgba(2, 4, 18, 0.62);
+        -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+      }
+      #player.open { display: grid; }
+      #player .frame { position: relative; width: min(92vw, 1100px); aspect-ratio: 16 / 9; border-radius: 18px; overflow: hidden; box-shadow: 0 30px 90px rgba(0, 0, 0, 0.55); background: #000; }
+      #player .yt { position: absolute; bottom: 22px; left: 50%; transform: translateX(-50%); pointer-events: auto; font-size: 13.5px; font-weight: 600; color: var(--pill-text, #fff); text-decoration: none; }
+      #player iframe { width: 100%; height: 100%; border: 0; }
+      #player .close { position: absolute; top: 18px; right: 22px; pointer-events: auto; cursor: pointer; font: inherit; font-size: 13.5px; font-weight: 600; border: 0; color: var(--pill-text, #fff); }
       /* theme switcher: a glass segmented control, top right */
       #themes, #modes { pointer-events: auto; display: flex; align-items: center; gap: 2px; padding: 4px; }
       #themes { right: 18px; top: 14px; }
+      #fs { display: grid; place-items: center; width: 30px; height: 30px; padding: 0 !important; margin-left: 2px; }
+      #fs svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+      #fs .shrink, #fs.on .grow { display: none; }
+      #fs.on .shrink { display: block; }
       /* reading mode: only present while a note is open */
       #modes {
         left: 50%; top: 14px; transform: translateX(-50%) translateY(-8px);
@@ -81,12 +115,17 @@
   <body>
     <div id="crumb" class="glass">Knowledge Space</div>
     <button id="back" class="glass" hidden>&#8249; Back to page</button>
-    <div id="themes" class="glass"><button data-theme="nebula">Nebula</button><button data-theme="forest">Forest</button></div>
-    <div id="modes" class="glass"><button data-mode="scroll">Scroll</button><button data-mode="page">Page</button><span id="pageno"></span></div>
+    <div id="themes" class="glass"><button data-theme="nebula">Nebula</button><button data-theme="forest">Forest</button><button data-theme="eclipse">Eclipse</button></div>
+    <div id="modes" class="glass"><button data-mode="scroll">Scroll</button><button data-mode="page">Page</button><span id="pageno"></span><button type="button" id="fs" aria-label="Fit page to screen height" title="Fit page to screen"><svg class="grow" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg><svg class="shrink" viewBox="0 0 24 24"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg></button></div>
+    <button id="play" class="glass" hidden>&#9654; Play video</button>
+    <div id="dataset" class="glass"><a href="?data=vr" data-data="vr">VR notes</a><a href="?data=news" data-data="news">Today's news</a></div>
+    <div id="layout" class="glass"><button data-layout="graph">Graph</button><button data-layout="rail">Categories</button></div>
+    <div id="cats" class="glass"></div>
+    <div id="player"><div class="frame"></div><button class="close glass">&#10005; Close</button><a class="yt glass" href="#" target="_blank" rel="noopener">Watch on YouTube &#8599;</a></div>
     <div id="leader"></div>
     <div id="tag" class="glass"><div class="row"><i class="dot"></i><span id="tagText"></span></div><small id="tagSub"></small></div>
     <div id="hud" class="glass">
-      <b>Drag</b> orbit &nbsp;·&nbsp; <b>Scroll</b> zoom, read a page, or dive into its mini graph &nbsp;·&nbsp; <b>Click</b> a panel to open &nbsp;·&nbsp; <b>Esc</b> or click empty space to go back &nbsp;·&nbsp; <b>T</b> switch theme
+      <b>Left-drag</b> orbit &nbsp;·&nbsp; <b>Right-drag</b> pan &nbsp;·&nbsp; <b>Left+right drag</b> fly &nbsp;·&nbsp; <b>Middle-drag</b> roll &nbsp;·&nbsp; <b>Scroll</b> zoom, read a page, or dive into its mini graph &nbsp;·&nbsp; <b>Click</b> a panel to open &nbsp;·&nbsp; <b>Esc</b> or click empty space to go back
     </div>
     <script type="module" src="/main.js"></script>
   </body>

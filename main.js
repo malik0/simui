@@ -12,7 +12,19 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
 // ---------- Load and parse the markdown database ----------
 
-const files = import.meta.glob('./database/*.md', { query: '?raw', import: 'default', eager: true });
+// ?data=news switches to the generated news dataset (npm run news); the default is the VR notes
+const DATASET = new URLSearchParams(location.search).get('data') === 'news' ? 'news' : 'vr';
+const DIR = DATASET === 'news' ? 'database-news' : 'database';
+const SPACE = DATASET === 'news' ? "Today's News" : 'Knowledge Space';
+const allFiles = {
+  vr: import.meta.glob('./database/*.md', { query: '?raw', import: 'default', eager: true }),
+  news: import.meta.glob('./database-news/*.md', { query: '?raw', import: 'default', eager: true }),
+};
+const allImages = {
+  vr: import.meta.glob('./database/images/*', { query: '?url', import: 'default', eager: true }),
+  news: import.meta.glob('./database-news/images/*', { query: '?url', import: 'default', eager: true }),
+};
+const files = allFiles[DATASET];
 
 const nodes = [];
 const byTitle = new Map();
@@ -52,6 +64,7 @@ const clean = (s) =>
 const bodyLines = (body) =>
   body.split('\n').map((l) => l.trimEnd()).filter((l) => l.trim()).map((l) => {
     if (l.startsWith('# ')) return null; // title is drawn separately
+    if (/^\[video\]\(youtube:/.test(l)) return null; // picked up as node.video below
     const img = l.match(/^!\[([^\]]*)\]\(([^)]+)\)\s*$/);
     if (img) return { type: 'img', alt: img[1], src: img[2].trim(), raw: '', text: '' };
     const item = (type, s) => ({ type, raw: s.replace(/`/g, ''), text: clean(s) });
@@ -64,13 +77,14 @@ for (const n of nodes) {
   n.lines = bodyLines(n.body);
   n.summary = n.lines.filter((l) => l.type !== 'h' && l.type !== 'img' && !l.text.startsWith('Back to'));
   n.image = n.lines.find((l) => l.type === 'img') ?? null;
+  n.video = n.body.match(/^\[video\]\(youtube:([\w-]{6,})\)/m)?.[1] ?? null; // YouTube id, played in an overlay
 }
 
 // Images referenced from notes as ![caption](images/file.svg), resolved relative to database/
-const imageUrls = import.meta.glob('./database/images/*', { query: '?url', import: 'default', eager: true });
+const imageUrls = allImages[DATASET];
 const images = new Map();
 await Promise.all(nodes.filter((n) => n.image).map(async (n) => {
-  const url = imageUrls[`./database/${n.image.src}`];
+  const url = imageUrls[`./${DIR}/${n.image.src}`];
   if (!url) return console.warn(`Image not found for "${n.title}": ${n.image.src}`);
   const img = new Image();
   img.src = url;
@@ -97,6 +111,7 @@ const ICON_BY_TAG = {
   concept: Lightbulb, hardware: Cpu, software: Wrench, tracking: Radar, perception: Eye, graphics: Shapes,
   input: Hand, performance: Gauge, comfort: Waves, audio: Volume2, math: Rotate3d, web: Globe, library: Box,
   tooling: Zap, optics: Aperture, index: LayoutGrid,
+  world: Globe, tech: Cpu, business: Gauge, sport: Timer, video: Radar, section: LayoutGrid,
 };
 
 // Lucide icons are lists of [tag, attributes]; turn one into an SVG image the canvas can draw at any size
@@ -204,6 +219,26 @@ const THEMES = {
       '--bg': '#04100a', '--pill-top': 'rgba(210, 255, 225, 0.20)', '--pill-bot': 'rgba(210, 255, 225, 0.07)',
       '--pill-edge': 'rgba(220, 255, 230, 0.28)', '--pill-text': 'rgba(240, 255, 244, 0.94)',
       '--vignette': 'rgba(1, 10, 4, 0.62)', '--tint': 'rgba(40, 150, 80, 0.35)',
+    },
+  },
+  // near-black sky, a faint cold glow where the nebula would be, silvery glass; pages are printed on dark stock
+  eclipse: {
+    label: 'Eclipse',
+    clear: '#020204', fog: '#07080f',
+    sky: { navy: '#020204', blue: '#10162e', violet: '#1c1534', teal: '#0a2a30', pink: '#2e1424', ray: '#ffffff' },
+    pane: [0.40, 0.42, 0.52], frost: [0.012, 0.014, 0.022], rim: [0.92, 0.94, 1], accent: [0.78, 0.84, 1.0],
+    line: [0.62, 0.68, 0.88], dust: [0.82, 0.86, 1.0],
+    nums: [0, 0.42, 1.0],
+    nums2: [0.1, 0.9, 0],
+    text: { link: '#a9bdff', linkLine: 'rgba(169, 189, 255, 0.5)', bullet: '#c9b2ff' },
+    chip: 'rgba(8, 9, 16, 0.9)', chipSoft: 'rgba(18, 20, 34, 0.86)', miniLine: '#b8c4ee',
+    hue: (h) => 0.56 + h * 0.4, // cool blues through violet to magenta
+    trailHue: [0.6, 0.1],
+    paper: { base: '#1b1c26', edge: '#0c0d14', ink: '#e8e9f2', link: '#93b0ff', sub: 'rgba(232, 233, 242, 0.62)', rule: 'rgba(232, 233, 242, 0.24)', plate: 'rgba(255, 255, 255, 0.06)' },
+    css: {
+      '--bg': '#030306', '--pill-top': 'rgba(255, 255, 255, 0.11)', '--pill-bot': 'rgba(255, 255, 255, 0.04)',
+      '--pill-edge': 'rgba(255, 255, 255, 0.18)', '--pill-text': 'rgba(240, 242, 252, 0.92)',
+      '--vignette': 'rgba(0, 0, 0, 0.72)', '--tint': 'rgba(120, 132, 210, 0.30)',
     },
   },
 };
@@ -829,6 +864,17 @@ function fxImpact({ warpAmt = 0.6, flashAmt = 0, shockUV = null } = {}) {
 
 const FONT = '-apple-system, "SF Pro Display", "SF Pro Text", "Segoe UI Variable Display", "Segoe UI", Inter, system-ui, sans-serif';
 
+// play badge drawn over a video note's thumbnail (cx, cy = centre of the picture, r = radius)
+function playBadge(ctx, cx, cy, r) {
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.55)'; ctx.fill();
+  ctx.lineWidth = r * 0.07; ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)'; ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(cx - r * 0.28, cy - r * 0.42); ctx.lineTo(cx + r * 0.5, cy); ctx.lineTo(cx - r * 0.28, cy + r * 0.42); ctx.closePath();
+  ctx.fillStyle = '#fff'; ctx.fill();
+  ctx.restore();
+}
+
 function wrap(ctx, text, maxW) {
   const out = [];
   let line = '';
@@ -879,7 +925,62 @@ function layoutWords(ctx, src, maxW) {
 }
 
 // Paints only the content: the glass itself (fill, edge light, blur) is drawn by the shader.
+// News-style card for notes with a photo: the picture fills the panel and the headline sits on a dark gradient so it stays readable
+function drawPoster(node, picture, blur) {
+  const W = 512, H = 640, m = 10, r = 30, pad = 30;
+  const c = document.createElement('canvas');
+  c.width = W; c.height = H;
+  const ctx = c.getContext('2d');
+  ctx.beginPath(); ctx.roundRect(m, m, W - m * 2, H - m * 2, r);
+  ctx.fillStyle = 'rgba(10, 14, 36, 0.9)'; ctx.fill();
+  ctx.save();
+  ctx.clip();
+  if (picture) {
+    const fit = Math.max((W - m * 2) / picture.width, (H - m * 2) / picture.height); // cover
+    ctx.drawImage(picture, (W - picture.width * fit) / 2, (H - picture.height * fit) / 2, picture.width * fit, picture.height * fit);
+  } else { // no photo: a soft wash of the category colour behind the headline
+    const hue = Math.round(hueOf(node) * 360);
+    const wash = ctx.createLinearGradient(0, 0, W, H);
+    wash.addColorStop(0, `hsl(${hue}, 55%, 34%)`); wash.addColorStop(1, `hsl(${(hue + 40) % 360}, 60%, 16%)`);
+    ctx.fillStyle = wash; ctx.fillRect(0, 0, W, H);
+  }
+  const top = ctx.createLinearGradient(0, 0, 0, 170);
+  top.addColorStop(0, 'rgba(4, 6, 20, 0.6)'); top.addColorStop(1, 'rgba(4, 6, 20, 0)');
+  ctx.fillStyle = top; ctx.fillRect(0, 0, W, 170);
+  const bottom = ctx.createLinearGradient(0, H * 0.36, 0, H);
+  bottom.addColorStop(0, 'rgba(6, 8, 24, 0)'); bottom.addColorStop(0.45, 'rgba(6, 8, 24, 0.72)'); bottom.addColorStop(1, 'rgba(6, 8, 24, 0.95)');
+  ctx.fillStyle = bottom; ctx.fillRect(0, H * 0.36, W, H * 0.64);
+  ctx.restore();
+
+  ctx.textBaseline = 'top';
+  // headline, bottom-aligned
+  ctx.font = `650 34px ${FONT}`;
+  let lines = wrap(ctx, node.title, W - pad * 2);
+  if (lines.length > 4) { lines = lines.slice(0, 4); lines[3] = lines[3].replace(/[ ,.;:]*$/, '') + '…'; }
+  const lh = 42, textTop = H - m - 30 - lines.length * lh;
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.7)'; ctx.shadowBlur = 10;
+  ctx.fillStyle = '#fff';
+  lines.forEach((l, i) => ctx.fillText(l, pad, textTop + i * lh));
+  ctx.shadowBlur = 0;
+  // kicker above the headline: category and source
+  ctx.font = `600 14px ${FONT}`;
+  ctx.letterSpacing = '2px';
+  ctx.fillStyle = new THREE.Color().setHSL(hueOf(node), 0.85, 0.72).getStyle();
+  ctx.fillText(node.tags.slice(0, 2).join('  ·  ').toUpperCase(), pad, textTop - 28);
+  ctx.letterSpacing = '0px';
+  if (node.video) playBadge(ctx, W / 2, H * 0.36, 46);
+  return toTexture(c, blur, 1);
+}
+
 function drawPanel(node, detailed, blur = 0, scroll = 0) {
+  const lead = node.image && !node.image.src.endsWith('.svg') && images.get(node.image.src);
+  const story = DATASET === 'news' && !node.tags.includes('index') && !node.tags.includes('section');
+  if (!detailed && (lead || story)) { // photo notes (and every news story) are drawn as poster cards
+    node.hits = [];
+    node.hitSize = [512, 640];
+    node.scrollMax = 0;
+    return drawPoster(node, lead || null, blur);
+  }
   const W = detailed ? 1024 : 512, H = detailed ? 1280 : 640, s = W / 512;
   const c = document.createElement('canvas');
   c.width = W; c.height = H;
@@ -927,17 +1028,21 @@ function drawPanel(node, detailed, blur = 0, scroll = 0) {
   const contentTop = y;
 
   const picture = node.image && images.get(node.image.src);
+  let pictureRect = null; // the thumbnail's box, clickable on a video note
   if (picture) {
     const bw = W - pad * 2, bh = (detailed ? 290 : 140) * s, inset = 14 * s;
+    pictureRect = { x: pad, y, w: bw, h: bh, video: true };
     pill(pad, y, bw, bh, 18 * s);
     ctx.fillStyle = 'rgba(255, 255, 255, 0.09)';
     ctx.fill();
     ctx.save();
     ctx.clip();
-    const fit = Math.min((bw - inset * 2) / picture.width, (bh - inset * 2) / picture.height);
+    const photo = !/\.svg$/i.test(node.image.src); // photos fill the frame, diagrams stay whole
+    const fit = photo ? Math.max(bw / picture.width, bh / picture.height) : Math.min((bw - inset * 2) / picture.width, (bh - inset * 2) / picture.height);
     const iw = picture.width * fit, ih = picture.height * fit;
     ctx.drawImage(picture, pad + (bw - iw) / 2, y + (bh - ih) / 2, iw, ih);
     ctx.restore();
+    if (node.video) playBadge(ctx, pad + bw / 2, y + bh / 2, Math.min(bh * 0.2, 44 * s));
     y += bh + 8 * s;
     if (detailed && node.image.alt) {
       ctx.font = `${13 * s}px ${FONT}`;
@@ -950,7 +1055,7 @@ function drawPanel(node, detailed, blur = 0, scroll = 0) {
 
   const fontPx = (detailed ? 19 : 21) * s; // the open page uses smaller text so whole notes fit
   const lineH = fontPx * 1.38, maxY = H - 64 * s;
-  const hits = [];
+  const hits = detailed && node.video && pictureRect ? [pictureRect] : [];
   node.hits = detailed ? hits : [];
   node.hitSize = [W, H];
   const items = detailed ? node.lines : node.summary;
@@ -1290,8 +1395,8 @@ let zoomActive = false, zoomGoal = 0, zoomCur = 0, zoomV = 0;
 const zoomDir = new THREE.Vector3();
 const easeInOutCubic = (p) => (p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2);
 
-function flyTo(target, dist) {
-  const dir = new THREE.Vector3().subVectors(camera.position, controls.target).normalize();
+function flyTo(target, dist, dirOverride) {
+  const dir = (dirOverride ? dirOverride.clone() : new THREE.Vector3().subVectors(camera.position, controls.target)).normalize();
   goalTarget.copy(target);
   goalCam.copy(target).addScaledVector(dir, dist);
   flightFromTarget.copy(controls.target);
@@ -1368,6 +1473,24 @@ function arrangeByConnection(root, hops, viewDir) {
 const crumb = document.getElementById('crumb');
 const backBtn = document.getElementById('back');
 backBtn.addEventListener('click', () => exitGraph());
+const playBtn = document.getElementById('play');
+const player = document.getElementById('player');
+const updatePlay = () => { playBtn.hidden = !(selected && selected.video && !graphMode); };
+function openVideo(id) {
+  player.querySelector('.frame').innerHTML = `<iframe src="https://www.youtube-nocookie.com/embed/${id}?autoplay=1&rel=0" referrerpolicy="strict-origin-when-cross-origin" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen></iframe>`;
+  player.querySelector('.yt').href = `https://www.youtube.com/watch?v=${id}`;
+  player.classList.add('open');
+}
+function closeVideo() {
+  player.classList.remove('open');
+  player.querySelector('.frame').innerHTML = ''; // drops the iframe, which stops playback
+}
+playBtn.addEventListener('click', () => selected?.video && openVideo(selected.video));
+player.addEventListener('click', (e) => { if (e.target === player || e.target.closest('.close')) closeVideo(); });
+addEventListener('keydown', (e) => { if (e.key === 'Escape' && player.classList.contains('open')) { closeVideo(); e.stopImmediatePropagation(); } }, true);
+document.querySelectorAll('#dataset a').forEach((a) => a.classList.toggle('on', a.dataset.data === DATASET));
+document.title = SPACE;
+crumb.textContent = SPACE;
 const hint = document.getElementById('hud');
 const defaultHint = hint.innerHTML;
 const setHint = (html) => { hint.innerHTML = html; };
@@ -1453,16 +1576,19 @@ function updateHoverTag(t, dt) {
 // `instant` skips the animation (used for deep links such as #Three.js)
 function select(node, instant = false) {
   selected = node;
+  if (node && layoutMode === 'rail') { railGoal = railCur = node.group.index; railV = 0; } // closing the note returns to its category
   graphMode = false;
   mzGoal = mz = mzV = 0;
   miniBead = null;
   graphSet.clear();
-  edgeVisGoal.fill(1);
+  edgeVisGoal.fill(!node && layoutMode === 'rail' ? 0.06 : 1); // links are noise between flat walls, so they hide until a note is open
   backBtn.hidden = true;
-  setHint(defaultHint);
-  controls.autoRotate = !node;
-  crumb.textContent = node ? `Knowledge Space  ›  ${node.title}` : 'Knowledge Space';
-  history.replaceState(null, '', node ? `#${encodeURIComponent(node.title)}` : location.pathname);
+  setHint(layoutMode === 'rail' ? railHint : defaultHint);
+  controls.autoRotate = !node && layoutMode === 'graph';
+  if (node) applyOrbitLimits();
+  crumb.textContent = node ? `${SPACE}  ›  ${node.title}` : SPACE;
+  updatePlay();
+  history.replaceState(null, '', node ? `#${encodeURIComponent(node.title)}` : location.pathname + location.search);
   const hops = node ? hopsFrom(node) : null;
   if (node) {
     arrangeByConnection(node, hops, new THREE.Vector3().subVectors(camera.position, controls.target).normalize());
@@ -1486,7 +1612,7 @@ function select(node, instant = false) {
   refreshLinks();
   if (node) { setupMini(node); attachPaper(node); }
   if (node) flyTo(node.pos, 6.5);
-  else flyTo(new THREE.Vector3(), HOME_DIST);
+  else goHome();
   if (!instant) {
     // opening a note: the view warps as the camera dives in, then a shockwave and a burst of sparks land with it
     fxImpact({ warpAmt: node ? 0.55 : 0.25 });
@@ -1859,8 +1985,9 @@ function enterGraph() {
     }
   }
   edges.forEach(([a, b], i) => { edgeVisGoal[i] = graphSet.has(a) && graphSet.has(b) ? 1 : 0; });
-  crumb.textContent = `Knowledge Space  ›  ${center.title}  ›  Graph`;
+  crumb.textContent = `${SPACE}  ›  ${center.title}  ›  Graph`;
   backBtn.hidden = false;
+  updatePlay();
   controls.autoRotate = true;
   flyTo(center.pos, R * 1.5 + 3.2);
   mini.root.getWorldPosition(beadPos); // the bubble pops: iridescent droplets fly out of it
@@ -1983,8 +2110,12 @@ function drawPaperPage(node, idx) {
       const img = images.get(item.src);
       ctx.beginPath(); ctx.roundRect(PG.pad, y, bodyW, 300, 20);
       ctx.fillStyle = P.plate; ctx.fill();
-      const fit = Math.min((bodyW - 40) / img.width, 260 / img.height);
+      const photo = !/\.svg$/i.test(item.src);
+      const fit = photo ? Math.max(bodyW / img.width, 300 / img.height) : Math.min((bodyW - 40) / img.width, 260 / img.height);
+      ctx.save(); ctx.clip(); // the plate path from above
       ctx.drawImage(img, PG.pad + (bodyW - img.width * fit) / 2, y + (300 - img.height * fit) / 2, img.width * fit, img.height * fit);
+      ctx.restore();
+      if (node.video) { playBadge(ctx, PG.pad + bodyW / 2, y + 150, 46); hits.push({ x: PG.pad, y, w: bodyW, h: 300, video: true }); }
       if (item.alt) {
         ctx.font = `italic 400 24px ${SERIF}`; ctx.fillStyle = P.sub;
         ctx.fillText(item.alt, PG.pad, y + 312);
@@ -2176,7 +2307,8 @@ const paper = (() => {
 const book = { cur: 0, active: false, dir: 0, L: 0, U: 0, p: 0, pV: 0, goal: 0, dragging: false, tilt: 0.12, shine: 0, lastP: 0, key: '' };
 let paperShow = 0, paperShowV = 0; // 0 = still glass, 1 = fully paper
 const modesEl = document.getElementById('modes');
-const modeBtns = [...modesEl.querySelectorAll('button')];
+const fitEl = document.getElementById('fs');
+const modeBtns = [...modesEl.querySelectorAll('button[data-mode]')];
 const pageNoEl = document.getElementById('pageno');
 
 function updatePageNo() {
@@ -2320,16 +2452,18 @@ function pick(e) {
   const hit = ray.intersectObjects(panels.filter((p) => p.visible), false)[0];
   if (!hit) return { node: null, link: null, uv: null };
   const node = hit.object.userData.node;
-  let link = null;
+  let link = null, video = false;
   if (node === selected && node.detailed) {
     const [W, H] = node.hitSize;
     const px = hit.uv.x * W, py = (1 - hit.uv.y) * H;
     // in page view the links are the ones printed on the current paper page (and only while it lies flat)
     const inBook = readMode === 'page' && paperShow > 0.5;
     const hits = inBook ? (book.active ? [] : node.pageHits?.[book.cur] ?? []) : node.hits;
-    link = hits.find((r) => px >= r.x && px <= r.x + r.w && py >= r.y && py <= r.y + r.h)?.link ?? null;
+    const r = hits.find((h) => px >= h.x && px <= h.x + h.w && py >= h.y && py <= h.y + h.h);
+    link = r?.link ?? null;
+    video = !!r?.video;
   }
-  return { node, link, uv: hit.uv };
+  return { node, link, video, uv: hit.uv };
 }
 
 // Dragging the mini graph spins its constellation like a trackball and keeps a little momentum on release.
@@ -2369,7 +2503,7 @@ function movePageDrag(e) {
   if (!book.dragging) return;
   book.p = THREE.MathUtils.clamp(book.dir > 0 ? -dx / (d.pagePx * 0.95) : 1 - dx / (d.pagePx * 0.95), 0, 1);
   book.pV = 0;
-  book.tilt = THREE.MathUtils.clamp((d.y0 - e.clientY) / d.pagePx * 0.9, -0.45, 0.45); // the fold leans with your hand
+  book.tilt = THREE.MathUtils.clamp((e.clientY - d.y0) / d.pagePx * 0.9, -0.45, 0.45); // the fold leans with your hand
 }
 
 function finishPageDrag() {
@@ -2399,7 +2533,7 @@ addEventListener('pointerup', endMiniDrag);
 addEventListener('pointercancel', endMiniDrag);
 renderer.domElement.addEventListener('pointerup', (e) => {
   if (!downAt || Math.hypot(e.clientX - downAt[0], e.clientY - downAt[1]) > 5) return;
-  const { node, link, onMini, bead } = pick(e);
+  const { node, link, video, onMini, bead } = pick(e);
   if (graphMode) { // on the graph screen: a tile opens that note, anything else steps back to the page
     if (node && node !== selected) select(node);
     else exitGraph();
@@ -2409,6 +2543,7 @@ renderer.domElement.addEventListener('pointerup', (e) => {
     if (bead) popBubbleTo(bead);           // zoomed in: a bead bursts the bubble and takes you to its note
     else if (mz < 0.25) enterGraph();      // a plain click on the widget opens the isolated graph
   }
+  else if (video && node.video) openVideo(node.video);
   else if (link) select(link);
   else if (node === selected && readMode === 'page' && paperShow > 0.5 && !book.active) {
     // tapping the outer edge of the paper turns the page, like a thumb on the corner of a book
@@ -2447,7 +2582,7 @@ renderer.domElement.addEventListener('pointermove', (e) => {
     miniHovered = true;
     return;
   }
-  const { node, link, uv, onMini, miniUV, bead } = pick(e);
+  const { node, link, video, uv, onMini, miniUV, bead } = pick(e);
   hovered = node;
   miniHovered = !!onMini;
   miniBead = bead ?? null;
@@ -2455,7 +2590,7 @@ renderer.domElement.addEventListener('pointermove', (e) => {
   else if (node) node.mesh.material.uniforms.uPointer.value.copy(uv); // the glass lights up under the cursor
   const onPaper = node === selected && readMode === 'page' && paperShow > 0.5 && !graphMode;
   renderer.domElement.style.cursor = onMini ? (bead ? 'pointer' : 'grab')
-    : link ? 'pointer' : onPaper ? 'grab'
+    : link || video ? 'pointer' : onPaper ? 'grab'
     : node && (node !== selected || graphMode) ? 'pointer' : 'default';
 });
 
@@ -2568,6 +2703,320 @@ for (const n of nodes) {
   scene.add(n.icon);
 }
 
+// ---------- Category rail ----------
+// The other way to lay the notes out: grouped by first tag into walls stacked one behind another in depth. The wheel
+// flies the camera forward through them (shift / ctrl + wheel still zooms), arrows and the pill bar jump.
+
+const graphPos = new Map(nodes.map((n) => [n, n.pos.clone()])); // the force-directed positions
+const CELL_W = PANEL_W * 1.3, CELL_H = PANEL_H * 1.22, RAIL_DEPTH = 10; // walls are stacked this far apart in depth
+const railHint = '<b>Scroll</b> fly through categories &nbsp;·&nbsp; <b>Left+right drag</b> zoom to the panel under the pointer &nbsp;·&nbsp; <b>Left-drag</b> orbit &nbsp;·&nbsp; <b>Right-drag</b> pan &nbsp;·&nbsp; <b>Middle-drag</b> roll &nbsp;·&nbsp; <b>Click</b> a panel to open';
+const groups = [];
+const RAIL_DIR = new THREE.Vector3(0.05, 0.04, 1).normalize(); // nearly front-on, so a flat wall keeps even column sizes
+const RAIL_LOOK = new THREE.Vector3(0, 1.0, 0); // focus a little above the wall's middle so its title fits in view too
+
+(function buildRail() {
+  const hub = nodes.find((n) => n.tags.includes('index')) ?? nodes[0];
+  // categories follow the index: the hub's own link order first, then everything else breadth-first
+  const listed = [...hub.body.matchAll(/\[\[([^\]|]+)(?:\|[^\]]*)?\]\]/g)].map((m) => byTitle.get(m[1].trim().toLowerCase())).filter(Boolean);
+  const order = [...new Set([hub, ...listed, ...hopsFrom(hub).keys()])];
+  const byKey = new Map();
+  for (const n of order) {
+    const key = n.tags[0] ?? 'notes';
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key).push(n);
+  }
+  if (byKey.size > 1 && byKey.get(hub.tags[0] ?? 'notes').length === 1) { // a lone hub would waste the first wall: it leads the next category instead
+    const hubKey = hub.tags[0] ?? 'notes';
+    byKey.delete(hubKey);
+    const [firstKey] = byKey.keys();
+    byKey.get(firstKey).unshift(hub);
+  }
+  for (const [key, list] of byKey) {
+    const header = (n) => (n.tags.includes('index') ? 0 : n.tags.includes('section') ? 1 : 2);
+    list.sort((a, b) => header(a) - header(b)); // stable: section / index notes lead their wall
+    // wider screens get wider walls, so the grid fills the view instead of standing in the middle of it
+    const cols = list.length <= 1 ? 1 : Math.min(list.length, THREE.MathUtils.clamp(Math.round(Math.sqrt(list.length * (innerWidth / innerHeight) * (CELL_H / CELL_W) * 0.8)), 2, 5));
+    const rows = Math.ceil(list.length / cols);
+    const W = cols * CELL_W, H = rows * CELL_H;
+    const g = { key, label: key.charAt(0).toUpperCase() + key.slice(1), nodes: list, cols, rows, W, H, lat: W * 1.3 + 2.5, off: 0 }; // lat: how far to the side the wall floats while it is still ahead of you
+    // each wall sits deeper than the last, nudged around a small spiral so the next one peeks out from behind the current
+    const k = groups.length;
+    g.c = new THREE.Vector3(Math.sin(k * 1.9) * 2.4, Math.cos(k * 1.9) * 1.3, -k * RAIL_DEPTH);
+    list.forEach((n, i) => {
+      const r = Math.floor(i / cols), c = i % cols;
+      const inRow = Math.min(cols, list.length - r * cols); // a short last row is centred
+      n.group = g;
+      n.railPos = new THREE.Vector3(g.c.x + (c - (inRow - 1) / 2) * CELL_W, g.c.y + ((rows - 1) / 2 - r) * CELL_H, g.c.z + [0, -0.8, 0.5][(r * 2 + c) % 3]);
+    });
+    groups.push(g);
+  }
+})();
+groups.forEach((g, i) => { g.index = i; });
+
+// Category titles hang above each wall as sprites, so they live in the scene with the panels
+function drawRailLabel(g) {
+  const c = g.labelCanvas ?? (g.labelCanvas = document.createElement('canvas'));
+  c.width = 1024; c.height = 256;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, c.width, c.height);
+  const col = new THREE.Color().setHSL(hueOf(g.nodes[0]), 0.75, 0.68).getStyle();
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.shadowColor = col; ctx.shadowBlur = 36;
+  ctx.fillStyle = '#fff';
+  ctx.font = `700 120px ${FONT}`;
+  ctx.fillText(g.label, 512, 105);
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = col;
+  ctx.fillRect(512 - 60, 190, 120, 6);
+  ctx.font = `500 34px ${FONT}`;
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
+  ctx.fillText(`${g.nodes.length} ${g.nodes.length === 1 ? 'note' : 'notes'}`, 512, 232);
+  return c;
+}
+for (const g of groups) {
+  g.sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(drawRailLabel(g)), transparent: true, depthWrite: false, fog: false, opacity: 0 }));
+  g.sprite.scale.set(8, 2, 1);
+  g.sprite.position.set(g.c.x, g.c.y + g.H / 2 + 1.5, g.c.z);
+  g.sprite.renderOrder = 4;
+  g.sprite.visible = false;
+  scene.add(g.sprite);
+}
+function redrawRailLabels() {
+  for (const g of groups) { drawRailLabel(g); g.sprite.material.map.needsUpdate = true; }
+}
+
+let layoutMode = new URLSearchParams(location.search).get('layout');
+if (layoutMode !== 'rail' && layoutMode !== 'graph') layoutMode = DATASET === 'news' ? 'rail' : 'graph';
+for (const n of nodes) n.pos.copy(layoutMode === 'rail' ? n.railPos : graphPos.get(n));
+for (const n of nodes) { n.cur.copy(n.pos); n.goal.copy(n.pos); n.mesh.position.copy(n.pos); }
+
+let railGoal = 0, railCur = 0, railV = 0; // category scroll position (fractional), eased
+let railStart = 0, snapTimer = 0;
+const railTmp = new THREE.Vector3();
+const clampRail = (v) => THREE.MathUtils.clamp(v, 0, groups.length - 1);
+const railIndex = () => Math.round(clampRail(railCur));
+
+// where the camera looks at a (fractional) scroll position: glides straight from one wall to the next, through the depth between them
+function railPoint(f, out = new THREE.Vector3()) {
+  const i = Math.min(Math.floor(f), groups.length - 2);
+  if (i < 0) return out.copy(groups[0].c).add(RAIL_LOOK);
+  return out.lerpVectors(groups[i].c, groups[i + 1].c, f - i).add(RAIL_LOOK);
+}
+// distance at which a wall fills the view comfortably
+function railDist(g) {
+  const t = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+  return Math.max((g.H + 3.4) * 0.55 / t, g.W * 0.56 / (t * camera.aspect), 8);
+}
+const railTarget = () => railPoint(railGoal);
+
+// Orbiting is limited while browsing the walls (they're flat), and free again when a note is open
+function applyFog() {
+  scene.fog.near = layoutMode === 'rail' ? 14 : 10;
+  scene.fog.far = layoutMode === 'rail' ? 75 : 40;
+}
+applyFog();
+
+function applyOrbitLimits() {
+  const on = layoutMode === 'rail' && !selected;
+  controls.minAzimuthAngle = on ? -1.0 : -Infinity;
+  controls.maxAzimuthAngle = on ? 1.0 : Infinity;
+  controls.minPolarAngle = on ? 1.0 : 0;
+  controls.maxPolarAngle = on ? 1.95 : Math.PI;
+}
+applyOrbitLimits();
+
+function goHome() {
+  if (layoutMode === 'rail') {
+    railGoal = railCur = Math.round(clampRail(railGoal));
+    railV = 0;
+    railPan.set(0, 0, 0);
+    flyTo(railTarget(), railDist(groups[railGoal]), RAIL_DIR);
+  } else flyTo(new THREE.Vector3(), HOME_DIST);
+}
+
+function gotoCategory(i) {
+  panDecay = true; // a pan eases back to the middle of the new wall
+  railGoal = Math.round(clampRail(i));
+  railStart = railGoal;
+  clearTimeout(snapTimer);
+  snapTimer = 0;
+  flying = false;
+  zoomCur = camera.position.distanceTo(controls.target); // ease to this wall's fitting distance too
+  zoomGoal = railDist(groups[railGoal]);
+  zoomV = 0;
+  zoomActive = true;
+}
+
+// Pill bar: one button per category
+const catsEl = document.getElementById('cats');
+const catBtns = groups.map((g) => {
+  const b = document.createElement('button');
+  b.textContent = g.label;
+  b.addEventListener('click', () => gotoCategory(g.index));
+  catsEl.appendChild(b);
+  return b;
+});
+let shownIndex = -1;
+function updateRailUI() {
+  const show = layoutMode === 'rail' && !selected && !graphMode;
+  catsEl.classList.toggle('show', show);
+  const i = railIndex();
+  if (i !== shownIndex) { shownIndex = i; catBtns.forEach((b, k) => b.classList.toggle('on', k === i)); }
+}
+
+// Scrolling the rail by an amount (in categories). Once the input goes quiet (or the chord is released) it settles on a wall:
+// a notch or a swipe always moves at least one wall.
+let railHold = false;
+function snapRail() {
+  snapTimer = 0;
+  railHold = false;
+  const moved = railGoal - railStart;
+  gotoCategory(railStart + (Math.abs(moved) < 0.06 ? 0 : Math.sign(moved) * Math.max(1, Math.round(Math.abs(moved)))));
+}
+function nudgeRail(d, hold = false) {
+  if (!snapTimer && !railHold) railStart = Math.round(clampRail(railGoal));
+  flying = false;
+  railGoal = clampRail(railGoal + d);
+  clearTimeout(snapTimer);
+  railHold = hold;
+  snapTimer = hold ? 0 : setTimeout(snapRail, 140);
+}
+
+// Wheel: scroll between categories.
+renderer.domElement.addEventListener('wheel', (e) => {
+  if (layoutMode !== 'rail' || selected || e.ctrlKey || e.shiftKey) return;
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  const d = (Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY) * (e.deltaMode === 1 ? 40 : 1);
+  nudgeRail(d * 0.002);
+}, { capture: true, passive: false });
+
+addEventListener('keydown', (e) => {
+  if (layoutMode !== 'rail' || selected || player.classList.contains('open') || e.metaKey || e.ctrlKey || e.altKey) return;
+  const i = Math.round(railGoal);
+  const to = { ArrowRight: i + 1, ArrowDown: i + 1, PageDown: i + 1, ArrowLeft: i - 1, ArrowUp: i - 1, PageUp: i - 1, Home: 0, End: groups.length - 1 }[e.key];
+  if (to === undefined) return;
+  e.preventDefault();
+  gotoCategory(to);
+});
+
+// Graph / Categories switch
+const layoutBtns = [...document.querySelectorAll('#layout button')];
+const markLayout = () => layoutBtns.forEach((b) => b.classList.toggle('on', b.dataset.layout === layoutMode));
+markLayout();
+function setLayout(mode) {
+  if (mode === layoutMode) return;
+  layoutMode = mode;
+  for (const n of nodes) n.pos.copy(mode === 'rail' ? n.railPos : graphPos.get(n));
+  const q = new URLSearchParams(location.search);
+  q.set('layout', mode);
+  history.replaceState(null, '', `${location.pathname}?${q}`);
+  markLayout();
+  applyFog();
+  applyOrbitLimits();
+  select(null); // lays the notes out in their new places and flies home
+}
+layoutBtns.forEach((b) => b.addEventListener('click', () => setLayout(b.dataset.layout)));
+
+// ---------- Mouse combinations ----------
+//   left-drag            orbit (OrbitControls)
+//   right-drag           pan (OrbitControls); in the rail the pan eases back when you move to another wall
+//   left + right drag    in the category view: zoom toward the panel under the pointer (without opening it);
+//                        in the graph: fly forward / back; with a note open: zoom
+//   middle-drag          roll the view around the line of sight; it levels out again on release
+// OrbitControls only looks at the button that went down first, so a chord is spotted here from the buttons bitmask
+// while the pointer moves, and takes the camera over until every button is up.
+controls.mouseButtons.MIDDLE = -1; // middle is ours (roll), not OrbitControls' dolly
+renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+
+const PAN_STATE = 2; // OrbitControls' internal state number for panning
+const railPan = new THREE.Vector3();
+let panDecay = false;
+const mouse = { chord: false, lastY: 0, roll: false, lastX: 0, focus: new THREE.Vector3() };
+let roll = 0, rollGoal = 0, rollV = 0;
+const flyDir = new THREE.Vector3();
+
+// The point a zoom heads for: the panel under the pointer, else the spot on the focus plane under it
+const focusPlane = new THREE.Plane();
+function chordFocus(e) {
+  const { node } = pick(e);
+  if (node) return mouse.focus.copy(node.mesh.position);
+  camera.getWorldDirection(flyDir);
+  focusPlane.setFromNormalAndCoplanarPoint(flyDir, controls.target);
+  return ray.ray.intersectPlane(focusPlane, mouse.focus) ?? mouse.focus.copy(controls.target);
+}
+
+function flyBy(d) { // d > 0 flies forward
+  flying = false;
+  if (selected) { // reading a note: forward means closer
+    if (!zoomActive) { zoomCur = zoomGoal = camera.position.distanceTo(controls.target); zoomV = 0; zoomActive = true; }
+    zoomGoal = THREE.MathUtils.clamp(zoomGoal * Math.exp(-d * 0.006), controls.minDistance, controls.maxDistance);
+  } else if (layoutMode === 'rail') {
+    // zoom about the focus point: camera and look-at point both scale toward (or away from) it, so the panel drifts to the middle as you close in
+    zoomActive = false; // the zoom spring must not fight the drag
+    const dist = camera.position.distanceTo(mouse.focus);
+    const k = THREE.MathUtils.clamp(Math.exp(-d * 0.006), Math.min(3 / dist, 1), Math.max(40 / dist, 1)); // stays 3 to 40 units from it
+    camera.position.sub(mouse.focus).multiplyScalar(k).add(mouse.focus);
+    controls.target.sub(mouse.focus).multiplyScalar(k).add(mouse.focus);
+    panDecay = false; // the new framing stays until you move to another category
+  } else {
+    camera.getWorldDirection(flyDir);
+    controls.target.addScaledVector(flyDir, d * 0.03);
+    camera.position.addScaledVector(flyDir, d * 0.03);
+  }
+}
+
+function endChord() {
+  mouse.chord = false;
+  controls.enabled = true;
+}
+
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (e.button === 2) panDecay = false; // a fresh pan stays where you leave it
+  if (e.button !== 1) return;
+  e.preventDefault();
+  e.stopImmediatePropagation(); // nothing else should treat a middle press as a click or a drag
+  mouse.roll = true;
+  mouse.lastX = e.clientX;
+  renderer.domElement.setPointerCapture(e.pointerId);
+}, true);
+
+document.addEventListener('pointermove', (e) => {
+  if (e.pointerType !== 'mouse') return;
+  if (mouse.roll && e.buttons & 4) {
+    rollGoal = THREE.MathUtils.clamp(rollGoal + (e.clientX - mouse.lastX) * 0.006, -Math.PI, Math.PI);
+    mouse.lastX = e.clientX;
+    return;
+  }
+  if (e.buttons === 3) {
+    if (!mouse.chord) { // the second button just joined the first
+      mouse.chord = true;
+      mouse.lastY = e.clientY;
+      chordFocus(e);
+      controls.enabled = false; // stops the orbit / pan that the first button started
+      downAt = null;            // and this is no longer a click
+    }
+    flyBy(mouse.lastY - e.clientY); // drag up = forward
+    mouse.lastY = e.clientY;
+  }
+}, true);
+
+addEventListener('pointerup', (e) => {
+  if (e.button === 1 && mouse.roll) { mouse.roll = false; rollGoal = 0; }
+  if (mouse.chord && e.buttons === 0) endChord();
+}, true);
+addEventListener('blur', () => { mouse.roll = false; rollGoal = 0; if (mouse.chord) endChord(); });
+
+// Starting view: the first wall in rail mode
+if (layoutMode === 'rail') {
+  controls.autoRotate = false;
+  setHint(railHint);
+  edgeVisGoal.fill(0.06);
+  edgeVis.set(edgeVisGoal);
+  controls.target.copy(railTarget());
+  camera.position.copy(controls.target).addScaledVector(RAIL_DIR, railDist(groups[0]));
+}
+
 // Deep link: index.html#Three.js opens that note straight away
 {
   const target = byTitle.get(decodeURIComponent(location.hash.slice(1)).toLowerCase());
@@ -2589,6 +3038,7 @@ function setTheme(name) {
   setThemeGoals(theme); // shader colours and the page chrome ease over by themselves
   try { localStorage.setItem('kg-theme', name); } catch { /* storage blocked */ }
   markTheme();
+  redrawRailLabels();
 
   // anything with colour painted into a texture is redrawn in the new palette
   const blurFor = { soft: 2.5, heavy: 5 };
@@ -2650,6 +3100,33 @@ renderer.setAnimationLoop(() => {
     if (flightT >= 1) flying = false;
   }
 
+  // category rail: the camera glides sideways to the scrolled-to wall (keeping its angle and distance)
+  if (layoutMode === 'rail' && !selected && !flying) {
+    railCur = dampTo(railCur, railV, railGoal, 6, dt);
+    railV = dampV;
+    railPoint(clampRail(railCur), railTmp);
+    if (controls.state === PAN_STATE || mouse.chord) { panDecay = false; railPan.copy(controls.target).sub(railTmp); } // being panned: the offset is wherever you put it
+    else {
+      if (panDecay) { railPan.multiplyScalar(Math.exp(-dt * 4)); if (railPan.lengthSq() < 1e-4) railPan.set(0, 0, 0); }
+      railTmp.add(railPan).sub(controls.target); // how far the focus has to travel this frame
+      controls.target.add(railTmp);
+      camera.position.add(railTmp);
+    }
+    applyOrbitLimits();
+  }
+  updateRailUI();
+  for (const g of groups) {
+    const want = layoutMode === 'rail' && !selected ? THREE.MathUtils.clamp(1.15 - Math.abs(g.index - railCur) * 0.75, 0, 1) : 0;
+    // walls ahead float out to alternating sides behind the current one, and slide to the middle as you reach them
+    const near = Math.min(Math.abs(g.index - railCur), 1);
+    const goalOff = layoutMode === 'rail' && !selected ? (g.index % 2 ? 1 : -1) * g.lat * near * near * (3 - 2 * near) : 0;
+    g.off += (goalOff - g.off) * Math.min(1, dt * 5);
+    g.sprite.position.x = g.c.x + g.off;
+    const m = g.sprite.material;
+    m.opacity += (want - m.opacity) * 0.12;
+    g.sprite.visible = m.opacity > 0.01;
+  }
+
   // eased scroll-zoom: a spring on the camera's distance from its focus point
   if (zoomActive) {
     zoomCur = dampTo(zoomCur, zoomV, zoomGoal, 7, dt);
@@ -2658,7 +3135,10 @@ renderer.setAnimationLoop(() => {
     camera.position.copy(controls.target).addScaledVector(zoomDir, zoomCur);
     if (Math.abs(zoomCur - zoomGoal) < 0.004) zoomActive = false;
   }
+  roll = dampTo(roll, rollV, rollGoal, mouse.roll ? 18 : 4, dt); // levels itself again after a roll
+  rollV = dampV;
   controls.update();
+  if (Math.abs(roll) > 1e-4) camera.rotateZ(roll); // roll sits on top of OrbitControls, which re-aims the camera every update
 
   if (selected?.detailed && Math.abs(selected.scrollGoal - selected.scroll) > 0.5) {
     const n = selected; // spring toward the target, redrawing the page texture as it moves
@@ -2681,7 +3161,7 @@ renderer.setAnimationLoop(() => {
       n.cur.z = dampTo(n.cur.z, n.vel.z, n.goal.z, 6, dt); n.vel.z = dampV;
     }
     const bob = n === selected ? 1 - (mini.zoomE || 0) : 1; // the open page stops floating while you read its mini graph
-    m.position.set(n.cur.x, n.cur.y + Math.sin(t * 0.8 + n.index) * 0.06 * bob, n.cur.z);
+    m.position.set(n.cur.x + n.group.off, n.cur.y + Math.sin(t * 0.8 + n.index) * 0.06 * bob, n.cur.z);
     let og = n.opacityGoal, sg = n.scaleGoal * (n === hovered && n !== selected ? 1.12 : 1), hv = n === hovered ? 1 : 0;
     if (miniFocus > 0.01 && n !== selected) {
       if (selected.links.has(n)) {
@@ -2693,6 +3173,11 @@ renderer.setAnimationLoop(() => {
     }
     // level of detail: once a note is too small on screen to read, it cross-fades into its icon tile (and grows a little)
     const camDist = camera.position.distanceTo(m.position);
+    if (layoutMode === 'rail' && !selected) {
+      og *= THREE.MathUtils.smoothstep(camDist, 1.5, 5.5);                              // panels dissolve as the camera flies through their wall
+      const rel = n.group.index - railCur; // walls you've passed vanish quickly; the ones ahead stay visible but dimmer the further away
+      og *= rel < 0 ? THREE.MathUtils.clamp(1 + rel * 1.5, 0, 1) : (1 - 0.4 * Math.min(rel, 1)) * THREE.MathUtils.clamp(2.6 - rel, 0, 1); // only the next two walls show
+    }
     const shown = PANEL_H * n.scaleGoal / (2 * camDist * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))); // fraction of screen height
     const lodGoal = n.detailed ? 0 : 1 - THREE.MathUtils.smoothstep(shown, 0.045, 0.1);
     u.uLod.value = THREE.MathUtils.lerp(u.uLod.value, lodGoal, 0.12);
@@ -2710,7 +3195,7 @@ renderer.setAnimationLoop(() => {
 
   bookStep(t, dt);
   const showModes = !!(selected?.detailed && !graphMode);
-  if (showModes !== modesShown) { modesShown = showModes; modesEl.classList.toggle('show', showModes); }
+  if (showModes !== modesShown) { modesShown = showModes; modesEl.classList.toggle('show', showModes); if (!showModes) fitEl.classList.remove('on'); }
 
   // Graph screen: hovering a tile lights its connections and dims the notes it is not linked to
   if (graphMode) {
@@ -2878,4 +3363,14 @@ renderer.setAnimationLoop(() => {
   updateMotionBlur(dt);
   updateHoverTag(t, dt);
   composer.render();
+});
+
+// ---------- Fit the open page to the screen height ----------
+const FIT_MARGIN = 0.94; // leave a sliver of space above and below
+fitEl.addEventListener('click', () => {
+  if (!selected?.detailed || graphMode) return;
+  const fitDist = PANEL_H * selected.mesh.scale.y / (2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * FIT_MARGIN);
+  const fitted = Math.abs(camera.position.distanceTo(controls.target) - fitDist) < 0.05 && !flying;
+  flyTo(selected.pos, fitted ? 6.5 : fitDist);
+  fitEl.classList.toggle('on', !fitted);
 });
