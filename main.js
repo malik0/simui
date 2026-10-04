@@ -2314,6 +2314,60 @@ const pageNoEl = document.getElementById('pageno');
 function updatePageNo() {
   const n = paper.owner ? paginate(paper.owner).length : 1;
   pageNoEl.textContent = n > 1 ? `${book.cur + 1} / ${n}` : '';
+  stack.n = n;
+}
+
+// The pile: sheets peeking out behind the page. Unread pages stack up on the right edge, pages already turned on the left,
+// so you can see how thick the document is and how far through it you are. Sheets slide in and out as the counts change.
+const STACK_MAX = 9, STACK_DX = 0.085, STACK_DY = 0.016;
+const stack = { n: 1, R: 0, L: 0, right: [], left: [] };
+{
+  const geo = new THREE.PlaneGeometry(PANEL_W, PANEL_H);
+  const make = () => {
+    const m = new THREE.Mesh(geo, new THREE.ShaderMaterial({
+      uniforms: { uColor: { value: T.paper }, uSize: { value: new THREE.Vector2(PANEL_W, PANEL_H) }, uAlpha: { value: 0 }, uShade: { value: 1 } },
+      vertexShader: 'varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }',
+      fragmentShader: /* glsl */ `
+        uniform vec3 uColor; uniform vec2 uSize; uniform float uAlpha, uShade;
+        varying vec2 vUv;
+        float sdBox(vec2 p, vec2 b, float r) { vec2 q = abs(p) - b + r; return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - r; }
+        void main() {
+          float d = sdBox((vUv - 0.5) * uSize, uSize * 0.5, 0.045);
+          if (d > 0.0) discard;
+          // the cut edge is what reads as a separate sheet: a dark line on light paper, a lit one on dark paper (a lit line on light paper just blooms)
+          float band = smoothstep(-0.02, 0.0, d);
+          bool light = dot(uColor, vec3(0.333)) > 0.3;
+          vec3 col = light ? uColor * uShade * (1.0 - 0.42 * band)
+                           : (uColor + 0.05) * uShade + vec3(1.0, 0.98, 0.9) * band * 0.5;
+          gl_FragColor = vec4(col, uAlpha);
+          #include <colorspace_fragment>
+        }`,
+      transparent: true,
+    }));
+    m.frustumCulled = false;
+    m.visible = false;
+    m.renderOrder = 1;
+    paper.group.add(m);
+    return m;
+  };
+  for (let i = 0; i < STACK_MAX; i++) { stack.right.push(make()); stack.left.push(make()); }
+}
+
+function updateStack(dt) {
+  const k = 1 - Math.exp(-dt * 7);
+  stack.R += (Math.min(STACK_MAX, Math.max(stack.n - 1 - book.cur, 0)) - stack.R) * k;
+  stack.L += (Math.min(STACK_MAX, book.cur) - stack.L) * k;
+  const place = (sheets, count, side, dim) => sheets.forEach((m, i) => {
+    const a = THREE.MathUtils.clamp(count - i, 0, 1); // the outermost sheet fades in or out as the count changes
+    m.visible = a > 0.01;
+    if (!m.visible) return;
+    const j = i + 1; // 1 = the sheet right behind the page
+    m.position.set(side * j * STACK_DX, -j * STACK_DY, 0.012 - j * 0.0006);
+    m.material.uniforms.uAlpha.value = a * paperShow;
+    m.material.uniforms.uShade.value = dim - 0.035 * j;
+  });
+  place(stack.right, stack.R, 1, 0.94);
+  place(stack.left, stack.L, -1, 0.84);
 }
 
 // The paper group rides on whichever note is open
@@ -2357,6 +2411,7 @@ function bookStep(t, dt) {
   paperShowV = dampV;
   paper.group.visible = !!node && paperShow > 0.01;
   if (!paper.group.visible) return;
+  updateStack(dt);
 
   if (book.active && !book.dragging) { // let go: the leaf springs the rest of the way (or back)
     book.p = dampTo(book.p, book.pV, book.goal, 8, dt);
