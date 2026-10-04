@@ -62,6 +62,35 @@
       #layout button { font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; border: 0; border-radius: 999px; padding: 6px 14px; color: inherit; background: transparent; opacity: 0.7; }
       #layout button:hover { opacity: 1; }
       #layout button.on { opacity: 1; background: var(--tint, rgba(70, 90, 210, 0.35)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35); }
+      #gear { right: 18px; top: 158px; pointer-events: auto; cursor: pointer; font: inherit; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 7px; padding: 8px 15px; transition: transform 0.15s ease; }
+      #gear:hover { transform: translateY(-1px); }
+      #gear svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+      #fps { left: 18px; bottom: 18px; font-size: 12px; font-weight: 600; padding: 6px 12px; font-variant-numeric: tabular-nums; }
+      #fps[hidden] { display: none; }
+      /* settings modal */
+      .modal {
+        position: fixed; inset: 0; z-index: 6; display: none; place-items: center; background: rgba(2, 4, 18, 0.55);
+        -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px);
+      }
+      .modal.open { display: grid; }
+      .modal .card { position: relative; pointer-events: auto; z-index: auto; width: min(92vw, 540px); max-height: 88vh; overflow-y: auto; padding: 22px 26px 24px; border-radius: 26px; background: linear-gradient(180deg, var(--pill-top, rgba(255,255,255,0.2)), var(--pill-bot, rgba(255,255,255,0.08))), rgba(10, 14, 36, 0.72); }
+      .modal .head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+      .modal h2 { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: 0.01em; }
+      .modal h3 { margin: 20px 0 8px; font-size: 11.5px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; opacity: 0.6; }
+      .modal .x { font: inherit; font-size: 15px; cursor: pointer; border: 0; width: 30px; height: 30px; border-radius: 50%; color: inherit; background: rgba(255, 255, 255, 0.1); }
+      .modal .x:hover { background: rgba(255, 255, 255, 0.2); }
+      .modal .note { margin: 10px 2px 0; font-size: 13px; line-height: 1.45; opacity: 0.72; }
+      .modal .row { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 7px 0; flex-wrap: wrap; }
+      .modal .label { font-size: 14px; font-weight: 600; }
+      .modal .label small { display: block; margin-top: 2px; font-size: 11.5px; font-weight: 500; opacity: 0.6; }
+      .modal .seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: 999px; background: rgba(255, 255, 255, 0.07); }
+      .modal .seg button { font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; border: 0; border-radius: 999px; padding: 6px 12px; color: inherit; background: transparent; opacity: 0.68; transition: background 0.2s ease, opacity 0.2s ease; white-space: nowrap; }
+      .modal .seg button:hover { opacity: 1; }
+      .modal .seg button.on { opacity: 1; background: var(--tint, rgba(70, 90, 210, 0.35)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3); }
+      .modal > .card > .seg { display: flex; }
+      .modal > .card > .seg button { flex: 1; padding: 8px 10px; }
+      .modal .reset { margin-top: 18px; font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; border: 0; border-radius: 999px; padding: 8px 16px; color: inherit; background: rgba(255, 255, 255, 0.09); }
+      .modal .reset:hover { background: rgba(255, 255, 255, 0.18); }
       /* category pill bar (rail layout) */
       #cats {
         left: 50%; bottom: 64px; transform: translateX(-50%) translateY(8px); display: flex; gap: 2px; padding: 4px; max-width: 92vw; overflow-x: auto;
@@ -104,12 +133,14 @@
       }
       #themes button:hover, #modes button:hover { opacity: 1; transform: translateY(-1px); }
       #themes button.on, #modes button.on { opacity: 1; background: var(--tint, rgba(70, 90, 210, 0.35)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35); }
-      #hud {
-        left: 50%; bottom: 18px; transform: translateX(-50%);
-        font-size: 12.5px; font-weight: 500; white-space: nowrap; color: rgba(255, 255, 255, 0.78);
-      }
-      #hud b { color: rgba(255, 255, 255, 0.98); font-weight: 600; }
-      @media (max-width: 760px) { #hud { display: none; } }
+      /* controls reference rows */
+      .modal .row.help { align-items: flex-start; }
+      .modal .keys { flex: 0 0 188px; display: flex; flex-wrap: wrap; gap: 5px; }
+      .modal kbd { font: inherit; font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 8px; background: rgba(255, 255, 255, 0.12); box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.12); white-space: nowrap; }
+      .modal .what { flex: 1 1 220px; font-size: 13.5px; line-height: 1.45; opacity: 0.86; }
+      #help { right: 128px; top: 158px; pointer-events: auto; cursor: pointer; font: inherit; font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: 7px; padding: 8px 15px; transition: transform 0.15s ease; }
+      #help:hover { transform: translateY(-1px); }
+      #help svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
     </style>
   </head>
   <body>
@@ -118,15 +149,17 @@
     <div id="themes" class="glass"><button data-theme="nebula">Nebula</button><button data-theme="forest">Forest</button><button data-theme="eclipse">Eclipse</button></div>
     <div id="modes" class="glass"><button data-mode="scroll">Scroll</button><button data-mode="page">Page</button><span id="pageno"></span><button type="button" id="fs" aria-label="Fit page to screen height" title="Fit page to screen"><svg class="grow" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg><svg class="shrink" viewBox="0 0 24 24"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg></button></div>
     <button id="play" class="glass" hidden>&#9654; Play video</button>
-    <div id="dataset" class="glass"><a href="?data=vr" data-data="vr">VR notes</a><a href="?data=news" data-data="news">Today's news</a></div>
+    <div id="dataset" class="glass"><a href="?data=vr" data-data="vr">VR notes</a><a href="?data=news" data-data="news">News</a></div>
+    <button id="gear" class="glass" type="button"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</button>
+    <div id="fps" class="glass" hidden></div>
+    <button id="help" class="glass" type="button"><svg viewBox="0 0 24 24"><rect x="6" y="3" width="12" height="18" rx="6"/><path d="M12 3v7"/></svg>Controls</button>
+    <div id="settings" class="modal"><div class="card glass"></div></div>
+    <div id="controls" class="modal"><div class="card glass"></div></div>
     <div id="layout" class="glass"><button data-layout="graph">Graph</button><button data-layout="rail">Categories</button></div>
     <div id="cats" class="glass"></div>
     <div id="player"><div class="frame"></div><button class="close glass">&#10005; Close</button><a class="yt glass" href="#" target="_blank" rel="noopener">Watch on YouTube &#8599;</a></div>
     <div id="leader"></div>
     <div id="tag" class="glass"><div class="row"><i class="dot"></i><span id="tagText"></span></div><small id="tagSub"></small></div>
-    <div id="hud" class="glass">
-      <b>Left-drag</b> orbit &nbsp;·&nbsp; <b>Right-drag</b> pan &nbsp;·&nbsp; <b>Left+right drag</b> fly &nbsp;·&nbsp; <b>Middle-drag</b> roll &nbsp;·&nbsp; <b>Scroll</b> zoom, read a page, or dive into its mini graph &nbsp;·&nbsp; <b>Click</b> a panel to open &nbsp;·&nbsp; <b>Esc</b> or click empty space to go back
-    </div>
     <script type="module" src="/main.js"></script>
   </body>
 </html>

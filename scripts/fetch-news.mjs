@@ -1,56 +1,38 @@
-// Builds the "news" dataset: reads public RSS feeds, downloads each story's lead image and writes
-// markdown notes (same format as database/) into database-news/. Run with `npm run news`.
-// Only headline, short summary, image and a link back to the original are kept, never full article text.
+// Builds the "news" dataset from ONE news agency: reads its public RSS feed, downloads each story's lead image and
+// writes markdown notes (same format as database/) into database-news/.
+//
+//   npm run news              Arab News (the default)
+//   npm run news -- <agency>  any agency defined in AGENCIES below
+//
+// Only the headline, a short summary, the first few paragraphs, the lead image and a link back to the original are kept.
 import { mkdir, rm, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import sharp from 'sharp';
 
 const OUT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../database-news');
-const PER_FEED = 3; // stories taken from each outlet per section
-const UA = 'Mozilla/5.0 (compatible; KnowledgeSpaceNews/1.0)';
+// No custom User-Agent: Arab News sits behind Cloudflare, which challenges (403) unfamiliar agent strings but lets Node's own default through.
+const HEADERS = {};
+const PER_SECTION = 12; // stories per category wall
+const IMAGE_WIDTH = 1280; // pictures are shrunk to this (wire photos arrive as 8000px, 9 MB originals that would swamp the browser)
 
-const SECTIONS = {
-  World: {
-    tag: 'world',
-    feeds: {
-      BBC: 'https://feeds.bbci.co.uk/news/world/rss.xml',
-      Guardian: 'https://www.theguardian.com/world/rss',
-      NPR: 'https://feeds.npr.org/1004/rss.xml',
-    },
-  },
-  Technology: {
-    tag: 'tech',
-    feeds: {
-      BBC: 'https://feeds.bbci.co.uk/news/technology/rss.xml',
-      Guardian: 'https://www.theguardian.com/technology/rss',
-      NPR: 'https://feeds.npr.org/1019/rss.xml',
-    },
-  },
-  Business: {
-    tag: 'business',
-    feeds: {
-      BBC: 'https://feeds.bbci.co.uk/news/business/rss.xml',
-      Guardian: 'https://www.theguardian.com/business/rss',
-      NPR: 'https://feeds.npr.org/1006/rss.xml',
-    },
-  },
-  Sport: {
-    tag: 'sport',
-    feeds: {
-      BBC: 'https://feeds.bbci.co.uk/sport/rss.xml',
-      Guardian: 'https://www.theguardian.com/sport/rss',
-      NPR: 'https://feeds.npr.org/1055/rss.xml',
-    },
-  },
-  Video: {
-    tag: 'video',
-    feeds: {
-      'Al Jazeera': 'https://www.youtube.com/feeds/videos.xml?channel_id=UCNye-wNBqNL5ZzHSJj3l8Bg',
-      DW: 'https://www.youtube.com/feeds/videos.xml?channel_id=UCknLrEdhRCp1aegoMqRaCZg',
-      Guardian: 'https://www.youtube.com/feeds/videos.xml?channel_id=UCIRYBXDze5krPDzAEOxFGVA',
-      BBC: 'https://www.youtube.com/feeds/videos.xml?channel_id=UC16niRr50-MSBwiO3YDb3RA',
-    },
+// Each agency: where its stories come from, and how its own categories map to the walls shown in the app.
+// `match` lists the feed's <category> values for a section; stories whose category is not listed go to the last section.
+const AGENCIES = {
+  arabnews: {
+    name: 'Arab News',
+    feeds: ['https://www.arabnews.com/rss.xml'],
+    sections: [
+      { name: 'World', tag: 'world', match: ['World'] },
+      { name: 'Middle East', tag: 'middle east', match: ['Middle East'] },
+      { name: 'Saudi Arabia', tag: 'saudi arabia', match: ['Saudi Arabia'] },
+      { name: 'Business', tag: 'business', match: ['Business', 'Finance', 'Tourism & Transport'] },
+      { name: 'Sport', tag: 'sport', match: ['Sport', 'Football', 'Golf', 'Tennis'] },
+      { name: 'Opinion', tag: 'opinion', match: ['Opinion'] },
+      { name: 'Lifestyle', tag: 'lifestyle', match: ['Lifestyle', 'Fashion'] },
+    ],
+    youtube: 'UCI8DegIWgK51cGakXcf1dOQ', // the agency's own YouTube channel, for the Video wall
   },
 };
 
@@ -80,13 +62,11 @@ function lead(item) {
     found.push({ url: decode(url), width: +(a.match(/width="(\d+)"/)?.[1] ?? 0) });
   }
   found.sort((a, b) => b.width - a.width);
-  let url = found[0]?.url ?? null;
-  if (url?.includes('ichef.bbci.co.uk')) url = url.replace(/\/standard\/\d+\//, '/standard/976/').replace(/\/news\/\d+\//, '/news/976/');
-  return url;
+  return found[0]?.url ?? null;
 }
 
 async function get(url, as = 'text') {
-  const res = await fetch(url, { headers: { 'user-agent': UA }, redirect: 'follow', signal: AbortSignal.timeout(15000) });
+  const res = await fetch(url, { headers: HEADERS, redirect: 'follow', signal: AbortSignal.timeout(15000) });
   if (!res.ok) throw new Error(`${res.status} ${url}`);
   return as === 'text' ? res.text() : { buf: Buffer.from(await res.arrayBuffer()), type: res.headers.get('content-type') ?? '' };
 }
@@ -94,34 +74,36 @@ async function get(url, as = 'text') {
 // YouTube's oEmbed endpoint answers 401 for videos whose owners disabled embedding, so it doubles as a playability check
 async function embeddable(id) {
   try {
-    const res = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${id}&format=json`, { headers: { 'user-agent': UA }, signal: AbortSignal.timeout(8000) });
+    const res = await fetch(`https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=${id}&format=json`, { headers: HEADERS, signal: AbortSignal.timeout(8000) });
     return res.ok;
   } catch { return false; }
 }
 
-async function readFeed(source, url) {
+async function readArticles(url) {
   const xml = await get(url);
-  if (xml.includes('<entry>')) { // Atom (YouTube channel feeds): one note per video
-    const vids = [...xml.matchAll(/<entry>[\s\S]*?<\/entry>/g)].map(([e]) => {
-      const id = e.match(/<yt:videoId>([^<]+)</)?.[1];
-      const thumb = e.match(/<media:thumbnail url="([^"]+)"/)?.[1] ?? null;
-      return {
-        source, video: id, link: `https://www.youtube.com/watch?v=${id}`,
-        title: text(tagText(e, 'title')),
-        summary: text(tagText(e, 'media:description').split(/\n\n|Episode credits|In this episode/)[0]).slice(0, 600),
-        image: thumb?.replace('hqdefault', 'maxresdefault') ?? null, fallbackImage: thumb,
-      };
-    }).filter((v) => v.video);
-    const ok = await Promise.all(vids.map((v) => embeddable(v.video)));
-    return vids.filter((_, i) => ok[i]);
-  }
   return [...xml.matchAll(/<item\b[\s\S]*?<\/item>/g)].map(([item]) => ({
-    source,
     title: text(tagText(item, 'title')),
     summary: text(tagText(item, 'description')),
     link: text(tagText(item, 'link')) || text(tagText(item, 'guid')),
+    category: text(tagText(item, 'category')),
     image: lead(item),
   })).filter((s) => s.title && s.link);
+}
+
+async function readVideos(channel) {
+  const xml = await get(`https://www.youtube.com/feeds/videos.xml?channel_id=${channel}`);
+  const vids = [...xml.matchAll(/<entry>[\s\S]*?<\/entry>/g)].map(([e]) => {
+    const id = e.match(/<yt:videoId>([^<]+)</)?.[1];
+    const thumb = e.match(/<media:thumbnail url="([^"]+)"/)?.[1] ?? null;
+    return {
+      video: id, link: `https://www.youtube.com/watch?v=${id}`,
+      title: text(tagText(e, 'title')),
+      summary: text(tagText(e, 'media:description').split(/\n\n|Episode credits|In this episode/)[0]).slice(0, 600),
+      image: thumb?.replace('hqdefault', 'maxresdefault') ?? null, fallbackImage: thumb,
+    };
+  }).filter((v) => v.video);
+  const ok = await Promise.all(vids.map((v) => embeddable(v.video)));
+  return vids.filter((_, i) => ok[i]);
 }
 
 // One request per article: lead image fallback plus a short readable excerpt (first few real paragraphs)
@@ -139,48 +121,55 @@ async function pageInfo(link) {
 
 async function saveImage(url) {
   try {
-    const { buf, type } = await get(url, 'bin');
-    const ext = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' }[type.split(';')[0]];
-    if (!ext || buf.length < 4000) return null;
-    const name = `${createHash('sha1').update(url).digest('hex').slice(0, 12)}.${ext}`;
-    await writeFile(path.join(OUT, 'images', name), buf);
+    const { buf } = await get(url, 'bin');
+    if (buf.length < 4000) return null;
+    // every picture becomes a modest JPEG: card-sized, sRGB, no metadata
+    const out = await sharp(buf, { limitInputPixels: false }).rotate()
+      .resize({ width: IMAGE_WIDTH, height: IMAGE_WIDTH, fit: 'inside', withoutEnlargement: true })
+      .flatten({ background: '#101428' }).jpeg({ quality: 82, mozjpeg: true }).toBuffer();
+    const name = `${createHash('sha1').update(url).digest('hex').slice(0, 12)}.jpg`;
+    await writeFile(path.join(OUT, 'images', name), out);
     return name;
   } catch { return null; }
 }
 
 // ---------- shaping stories into notes ----------
 
-// Note titles double as file names and [[wikilink]] targets, so keep them plain
-const safeTitle = (t) => t.replace(/[\\/:*?"<>|[\]#^]/g, '').replace(/\s+/g, ' ').trim().replace(/^(.{1,72})(\s.*)?$/, '$1').trim();
+// Note titles double as file names and [[wikilink]] targets, so keep them plain (and URL-safe: no %, #, ?)
+const safeTitle = (t) => t.replace(/\s*%/g, ' percent').replace(/[\\/:*?"<>|[\]#^]/g, '').replace(/\s+/g, ' ').trim().replace(/^(.{1,72})(\s.*)?$/, '$1').trim();
 const words = (t) => [...new Set(t.toLowerCase().match(/[a-z][a-z'-]{2,}/g) ?? [])].filter((w) => !STOP.has(w));
 const overlap = (a, b) => a.filter((w) => b.includes(w)).length;
 const bullets = (summary) => (summary.match(/[^.!?]+[.!?]+/g) ?? [summary]).map((s) => s.trim()).filter((s) => s.length > 25).slice(0, 3);
 
-async function build() {
+async function build(agencyKey) {
+  const agency = AGENCIES[agencyKey];
+  if (!agency) throw new Error(`Unknown agency "${agencyKey}". Known: ${Object.keys(AGENCIES).join(', ')}`);
   await rm(OUT, { recursive: true, force: true });
   await mkdir(path.join(OUT, 'images'), { recursive: true });
 
-  const sections = [];
-  const seen = []; // word sets of accepted headlines, to drop the same story from another outlet
-  for (const [name, def] of Object.entries(SECTIONS)) {
-    const lists = await Promise.all(Object.entries(def.feeds).map(([src, url]) =>
-      readFeed(src, url).then((items) => items.slice(0, 12)).catch((e) => (console.warn(`feed failed: ${e.message}`), []))));
-    // interleave outlets so one source doesn't dominate
-    const picked = [];
-    const counts = new Map();
-    for (let i = 0; i < 12; i++) {
-      for (const list of lists) {
-        const s = list[i];
-        if (!s || (counts.get(s.source) ?? 0) >= PER_FEED) continue;
-        const w = words(s.title);
-        if (seen.some((o) => overlap(w, o) >= Math.max(3, Math.min(w.length, o.length) * 0.6))) continue;
-        s.words = w;
-        seen.push(w);
-        counts.set(s.source, (counts.get(s.source) ?? 0) + 1);
-        picked.push(s);
-      }
+  // 1. read the feeds and sort the stories into sections by the agency's own category
+  const stories = [];
+  const seenLinks = new Set();
+  for (const url of agency.feeds) {
+    for (const s of await readArticles(url).catch((e) => (console.warn(`feed failed: ${e.message}`), []))) {
+      if (!seenLinks.has(s.link)) { seenLinks.add(s.link); stories.push(s); }
     }
-    await Promise.all(picked.map(async (s) => {
+  }
+  const sections = agency.sections.map((def) => ({ ...def, stories: [] }));
+  const fallback = sections[sections.length - 1];
+  for (const s of stories) {
+    const sec = sections.find((d) => d.match.some((m) => m.toLowerCase() === s.category.toLowerCase())) ?? fallback;
+    if (sec.stories.length < PER_SECTION) sec.stories.push(s);
+  }
+  if (agency.youtube) {
+    const videos = await readVideos(agency.youtube).catch((e) => (console.warn(`video feed failed: ${e.message}`), []));
+    if (videos.length) sections.push({ name: 'Video', tag: 'video', stories: videos.slice(0, PER_SECTION) });
+  }
+
+  // 2. fetch each story's page and picture
+  for (const sec of sections) {
+    await Promise.all(sec.stories.map(async (s) => {
+      s.source = agency.name;
       const info = s.video ? { image: null, paras: [], description: '' } : await pageInfo(s.link);
       s.paras = info.paras;
       if (info.description.length > s.summary.length) s.summary = info.description;
@@ -189,12 +178,13 @@ async function build() {
       s.words = words(`${s.title} ${s.summary}`);
       s.note = safeTitle(s.title);
     }));
-    sections.push({ name, tag: def.tag, stories: picked.filter((s) => s.note) });
-    console.log(`${name}: ${picked.length} stories`);
+    sec.stories = sec.stories.filter((s) => s.note);
+    console.log(`${sec.name}: ${sec.stories.length} stories`);
   }
+  const live = sections.filter((s) => s.stories.length);
+  const all = live.flatMap((s) => s.stories);
 
-  const all = sections.flatMap((s) => s.stories);
-  // One picture shared by several stories is a placeholder (NPR's logo, say), not a photo: drop it so those cards get a plain look
+  // One picture shared by several stories is a placeholder logo, not a photo: drop it so those cards get a plain look
   const uses = new Map();
   for (const s of all) if (s.file) uses.set(s.file, (uses.get(s.file) ?? 0) + 1);
   for (const [file, n] of uses) {
@@ -211,34 +201,34 @@ async function build() {
       .sort((a, b) => b.score - a.score).slice(0, 3).map((r) => r.o.note);
   }
 
+  // 3. write the notes: one hub, one note per section, one per story
   const date = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-  const hub = 'Todays News';
-  for (const sec of sections) {
-    const title = `${sec.name} News`;
-    await writeFile(path.join(OUT, `${title}.md`), [
-      '---', `tags: [${sec.tag}, section]`, '---', `# ${title}`, '',
-      `Top ${sec.name.toLowerCase()} stories, ${date}.`, '',
+  const hub = safeTitle(agency.name);
+  for (const sec of live) {
+    await writeFile(path.join(OUT, `${sec.name}.md`), [
+      '---', `tags: [${sec.tag}, section]`, '---', `# ${sec.name}`, '',
+      `${agency.name}: ${sec.name.toLowerCase()} stories, ${date}.`, '',
       ...sec.stories.map((s) => `- [[${s.note}]]`), '', `Back to [[${hub}]].`, '',
     ].join('\n'));
     for (const s of sec.stories) {
-      const lines = ['---', `tags: [${sec.tag}, ${s.source.toLowerCase()}]`, '---', `# ${s.note}`, ''];
-      if (s.file) lines.push(`![${s.source}](images/${s.file})`, '');
+      const lines = ['---', `tags: [${sec.tag}, ${agency.name.toLowerCase()}]`, '---', `# ${s.note}`, ''];
+      if (s.file) lines.push(`![${agency.name}](images/${s.file})`, '');
       if (s.video) lines.push(`[video](youtube:${s.video})`, '');
       const b = bullets(s.summary);
-      lines.push(...(b.length ? b.map((x) => `- ${x}`) : [s.summary ? `- ${s.summary}` : `- Read the full story at ${s.source}.`]));
+      lines.push(...(b.length ? b.map((x) => `- ${x}`) : [s.summary ? `- ${s.summary}` : `- Read the full story at ${agency.name}.`]));
       if (s.paras.length) lines.push('', '## Story', '', ...s.paras.flatMap((p) => [p, '']));
-      lines.push('', `- Source: ${s.source}`);
+      lines.push('', `- Source: ${agency.name}`);
       if (s.related.length) lines.push(`- Related: ${s.related.map((r) => `[[${r}]]`).join(', ')}`);
-      lines.push('', `Back to [[${title}]].`, '');
+      lines.push('', `Back to [[${sec.name}]].`, '');
       await writeFile(path.join(OUT, `${s.note}.md`), lines.join('\n'));
     }
   }
   await writeFile(path.join(OUT, `${hub}.md`), [
     '---', 'tags: [index]', '---', `# ${hub}`, '',
-    `Headlines from BBC, The Guardian and NPR, fetched ${date}. Start here and follow the links.`, '',
-    ...sections.flatMap((sec) => [`## ${sec.name}`, `- [[${sec.name} News]]`, '']),
+    `Latest headlines from ${agency.name}, fetched ${date}. Start here and follow the links.`, '',
+    ...live.flatMap((sec) => [`## ${sec.name}`, `- [[${sec.name}]]`, '']),
   ].join('\n'));
-  console.log(`Wrote ${all.length + sections.length + 1} notes to ${path.relative(process.cwd(), OUT)}`);
+  console.log(`Wrote ${all.length + live.length + 1} notes to ${path.relative(process.cwd(), OUT)}`);
 }
 
-build().catch((e) => { console.error(e); process.exit(1); });
+build(process.argv[2] ?? 'arabnews').catch((e) => { console.error(e); process.exit(1); });

@@ -12,10 +12,10 @@ import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
 // ---------- Load and parse the markdown database ----------
 
-// ?data=news switches to the generated news dataset (npm run news); the default is the VR notes
-const DATASET = new URLSearchParams(location.search).get('data') === 'news' ? 'news' : 'vr';
+// The generated news dataset (npm run news) is the default on this branch; ?data=vr shows the VR notes instead
+const DATASET = new URLSearchParams(location.search).get('data') === 'vr' ? 'vr' : 'news';
 const DIR = DATASET === 'news' ? 'database-news' : 'database';
-const SPACE = DATASET === 'news' ? "Today's News" : 'Knowledge Space';
+let SPACE = 'Knowledge Space'; // for the news dataset this becomes the agency's name, read from its index note below
 const allFiles = {
   vr: import.meta.glob('./database/*.md', { query: '?raw', import: 'default', eager: true }),
   news: import.meta.glob('./database-news/*.md', { query: '?raw', import: 'default', eager: true }),
@@ -73,6 +73,8 @@ const bodyLines = (body) =>
     return item('p', l);
   }).filter(Boolean);
 
+if (DATASET === 'news') SPACE = nodes.find((n) => n.tags.includes('index'))?.title ?? 'News';
+
 for (const n of nodes) {
   n.lines = bodyLines(n.body);
   n.summary = n.lines.filter((l) => l.type !== 'h' && l.type !== 'img' && !l.text.startsWith('Back to'));
@@ -112,6 +114,7 @@ const ICON_BY_TAG = {
   input: Hand, performance: Gauge, comfort: Waves, audio: Volume2, math: Rotate3d, web: Globe, library: Box,
   tooling: Zap, optics: Aperture, index: LayoutGrid,
   world: Globe, tech: Cpu, business: Gauge, sport: Timer, video: Radar, section: LayoutGrid,
+  'middle east': Radar, 'saudi arabia': Aperture, opinion: Lightbulb, lifestyle: Sparkles,
 };
 
 // Lucide icons are lists of [tag, attributes]; turn one into an SVG image the canvas can draw at any size
@@ -272,6 +275,25 @@ function setThemeGoals(th) {
   for (const [k, v] of Object.entries(th.css)) document.documentElement.style.setProperty(k, v);
 }
 setThemeGoals(theme);
+
+// ---------- Settings state ----------
+// (the panel that edits these, and the code that applies them, is further down)
+const SETTINGS_KEY = 'kg-settings';
+const DEFAULTS = { quality: 'auto', scale: 'auto', aa: 4, sky: 0.5, glass: 'full', bloom: true, lens: true, particles: true, reduceMotion: false, fps: false };
+const PRESETS = {
+  auto:   { scale: 'auto',   aa: 4, sky: 0.5,  glass: 'full',    bloom: true,  lens: true,  particles: true },
+  high:   { scale: 'native', aa: 4, sky: 0.5,  glass: 'full',    bloom: true,  lens: true,  particles: true },
+  medium: { scale: 1.5,      aa: 2, sky: 0.5,  glass: 'full',    bloom: true,  lens: true,  particles: true },
+  low:    { scale: 1,        aa: 0, sky: 0.25, glass: 'reduced', bloom: false, lens: false, particles: false },
+};
+const settings = (() => {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(SETTINGS_KEY)) ?? {}; } catch { /* storage blocked or corrupt */ }
+  const s = { ...DEFAULTS, ...saved };
+  const asked = new URLSearchParams(location.search).get('quality'); // ?quality=low|medium|high|auto, for this visit only
+  if (PRESETS[asked]) Object.assign(s, PRESETS[asked], { quality: asked });
+  return s;
+})();
 
 // ---------- Scene ----------
 
@@ -527,6 +549,7 @@ const WHITE = new THREE.Color(1, 1, 1);
 // ---------- Frosted glass: blurred backdrop for the open page ----------
 
 // Whole scene (minus the open page) is rendered small, blurred, and sampled by the page's glass shader.
+let skyScale = 0.5, glassScale = 1, backdropEvery = 2; // settings: sky detail, frosted-glass blur
 const dbSize = new THREE.Vector2();
 const rtScene = new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType });
 const rtA = new THREE.WebGLRenderTarget(2, 2, { type: THREE.HalfFloatType, depthBuffer: false });
@@ -558,10 +581,10 @@ const shared = { // uniforms shared by every panel's material
 function resizeTargets() {
   renderer.getDrawingBufferSize(dbSize);
   shared.uRes.value.copy(dbSize);
-  skyRT.setSize(Math.max(2, dbSize.x >> 1), Math.max(2, dbSize.y >> 1));
-  rtScene.setSize(Math.max(2, dbSize.x >> 1), Math.max(2, dbSize.y >> 1));
-  rtA.setSize(Math.max(2, dbSize.x >> 2), Math.max(2, dbSize.y >> 2));
-  rtB.setSize(Math.max(2, dbSize.x >> 2), Math.max(2, dbSize.y >> 2));
+  skyRT.setSize(Math.max(2, Math.round(dbSize.x * skyScale)), Math.max(2, Math.round(dbSize.y * skyScale)));
+  rtScene.setSize(Math.max(2, Math.round(dbSize.x * 0.5 * glassScale)), Math.max(2, Math.round(dbSize.y * 0.5 * glassScale)));
+  rtA.setSize(Math.max(2, Math.round(dbSize.x * 0.25 * glassScale)), Math.max(2, Math.round(dbSize.y * 0.25 * glassScale)));
+  rtB.setSize(Math.max(2, Math.round(dbSize.x * 0.25 * glassScale)), Math.max(2, Math.round(dbSize.y * 0.25 * glassScale)));
 }
 resizeTargets();
 
@@ -874,6 +897,7 @@ let warp = 0, flash = 0, shockAt = -10;
 const lensOf = (name) => lensPass.uniforms[name];
 
 function fxImpact({ warpAmt = 0.6, flashAmt = 0, shockUV = null } = {}) {
+  if (settings.reduceMotion) return; // no screen warps, flashes or shockwaves
   warp = Math.max(warp, warpAmt);
   flash = Math.max(flash, flashAmt);
   if (shockUV) {
@@ -1513,9 +1537,7 @@ addEventListener('keydown', (e) => { if (e.key === 'Escape' && player.classList.
 document.querySelectorAll('#dataset a').forEach((a) => a.classList.toggle('on', a.dataset.data === DATASET));
 document.title = SPACE;
 crumb.textContent = SPACE;
-const hint = document.getElementById('hud');
-const defaultHint = hint.innerHTML;
-const setHint = (html) => { hint.innerHTML = html; };
+document.querySelector('#dataset a[data-data="news"]').textContent = DATASET === 'news' ? SPACE : 'News';
 
 // ---------- Hover nameplate (main graph only) ----------
 // A glass tag springs out of the hovered note's corner icon on a glowing thread. Its title decodes
@@ -1605,7 +1627,6 @@ function select(node, instant = false) {
   graphSet.clear();
   edgeVisGoal.fill(!node && layoutMode === 'rail' ? 0.06 : 1); // links are noise between flat walls, so they hide until a note is open
   backBtn.hidden = true;
-  setHint(layoutMode === 'rail' ? railHint : defaultHint);
   controls.autoRotate = !node && layoutMode === 'graph';
   if (node) applyOrbitLimits();
   crumb.textContent = node ? `${SPACE}  ›  ${node.title}` : SPACE;
@@ -2017,7 +2038,6 @@ function enterGraph() {
   emitSparks(beadPos, 55, { speed: 3.2, size: 1.1, life: 0.9, hue: 0.88, sat: 0.9, white: 0.5 });
   fxImpact({ warpAmt: 1, flashAmt: 0.3, shockUV: { x: 0.5, y: 0.5 } }); // bigger bang for the graph
   emitSparks(center.pos, 220, { speed: 9, size: 1.6, life: 1.5, hue: hueOf(center) });
-  setHint('<b>Drag</b> orbit &nbsp;·&nbsp; <b>Hover</b> a note to trace its links &nbsp;·&nbsp; <b>Click</b> a note to open it &nbsp;·&nbsp; <b>Esc</b> back to the page');
 }
 
 // Clicking a node inside the zoomed bubble bursts it: iridescent droplets fly out from the bubble and from
@@ -2736,10 +2756,9 @@ addEventListener('keydown', (e) => {
 // ---------- Adaptive resolution ----------
 // Full pixel ratio (up to 2x) is kept for as long as the GPU keeps up. If frames stay slow the render scale steps down a
 // quarter at a time (down to 0.75x), and it steps back up after a long stretch of smooth frames, backing off if that fails.
-// ?adaptive=0 turns it off.
-const ADAPT = new URLSearchParams(location.search).get('adaptive') !== '0';
-const PX_MAX = renderer.getPixelRatio(), PX_MIN = Math.min(PX_MAX, 0.75);
-const quality = { px: PX_MAX, ema: 16.7, slow: 0, smooth: 0, upFrames: 1200, lastDown: 0, lastUp: 0 };
+// Only active when Resolution is set to Auto in the settings; ?adaptive=0 turns it off.
+const ADAPT_ALLOWED = new URLSearchParams(location.search).get('adaptive') !== '0';
+const quality = { px: renderer.getPixelRatio(), max: renderer.getPixelRatio(), min: Math.min(renderer.getPixelRatio(), 0.75), adaptive: ADAPT_ALLOWED, ema: 16.7, slow: 0, smooth: 0, upFrames: 1200, lastDown: 0, lastUp: 0 };
 function setRenderScale(px) {
   quality.px = px;
   renderer.setPixelRatio(px);
@@ -2753,22 +2772,226 @@ function setRenderScale(px) {
   console.info(`render scale ${px}x`);
 }
 function adaptQuality(frameSecs, now) {
-  if (!ADAPT || now < 4 || frameSecs <= 0 || frameSecs > 0.25) return; // not while loading; a stall (tab switch, upload) says nothing about speed
+  if (!quality.adaptive || now < 4 || frameSecs <= 0 || frameSecs > 0.25) return; // not while loading; a stall (tab switch, upload) says nothing about speed
   quality.ema += (frameSecs * 1000 - quality.ema) * 0.06;
-  if (quality.ema > 24 && quality.px > PX_MIN) {
+  if (quality.ema > 24 && quality.px > quality.min) {
     if (++quality.slow > 45) {
       if (now - quality.lastUp < 15) quality.upFrames = Math.min(quality.upFrames * 2, 14400); // stepping up just failed: wait longer next time
       quality.lastDown = now;
-      setRenderScale(Math.max(PX_MIN, quality.px - 0.25));
+      setRenderScale(Math.max(quality.min, quality.px - 0.25));
     }
   } else quality.slow = 0;
-  if (quality.ema < 18 && quality.px < PX_MAX) {
+  if (quality.ema < 18 && quality.px < quality.max) {
     if (++quality.smooth > quality.upFrames) {
       quality.lastUp = now;
-      setRenderScale(Math.min(PX_MAX, quality.px + 0.25));
+      setRenderScale(Math.min(quality.max, quality.px + 0.25));
     }
   } else quality.smooth = 0;
 }
+
+// ---------- Settings panel ----------
+// Quality presets plus the individual switches behind them. Everything applies live and is remembered.
+
+const settingsEl = document.getElementById('settings');
+const gearBtn = document.getElementById('gear');
+const fpsEl = document.getElementById('fps');
+const dustPoints = scene.children.find((c) => c.isPoints && c !== sparks); // the stars / fireflies
+
+const ADVANCED = [
+  { key: 'scale', label: 'Resolution', options: [['auto', 'Auto'], ['native', 'Native'], [1.5, '1.5×'], [1, '1×'], [0.75, '0.75×']] },
+  { key: 'aa', label: 'Anti-aliasing', options: [[0, 'Off'], [2, '2×'], [4, '4×']] },
+  { key: 'sky', label: 'Background detail', options: [[1, 'Full'], [0.5, 'Half'], [0.25, 'Quarter']] },
+  { key: 'glass', label: 'Frosted glass blur', options: [['full', 'Full'], ['reduced', 'Reduced']] },
+  { key: 'bloom', label: 'Glow', options: [[true, 'On'], [false, 'Off']] },
+  { key: 'lens', label: 'Lens & motion blur', options: [[true, 'On'], [false, 'Off']] },
+  { key: 'particles', label: 'Particles', options: [[true, 'On'], [false, 'Off']] },
+];
+const COMFORT = [
+  { key: 'reduceMotion', label: 'Reduce motion', options: [[false, 'Off'], [true, 'On']], hint: 'No auto-rotation, floating or screen warps' },
+  { key: 'fps', label: 'Show frame rate', options: [[false, 'Off'], [true, 'On']] },
+];
+const PRESET_NOTES = {
+  auto: 'Full quality. The resolution only drops if your frame rate does.',
+  high: 'Full quality at your display\'s native resolution, always.',
+  medium: 'A little less resolution and smoothing. A good balance on laptops.',
+  low: 'Fastest: lower resolution, no glow, lens effects or particles, and a simpler background.',
+  custom: 'Your own mix of the options below.',
+};
+
+function matchPreset() {
+  for (const name of Object.keys(PRESETS)) {
+    if (Object.keys(PRESETS[name]).every((k) => settings[k] === PRESETS[name][k])) return name;
+  }
+  return 'custom';
+}
+
+function applySettings() {
+  const s = settings;
+  // resolution: auto adapts below the native ratio when frames run slow; anything else is a fixed render scale
+  const native = Math.min(devicePixelRatio, 2);
+  quality.adaptive = s.scale === 'auto' && ADAPT_ALLOWED;
+  quality.max = s.scale === 'auto' || s.scale === 'native' ? native : Math.min(+s.scale, native);
+  quality.min = Math.min(quality.max, 0.75);
+  const px = quality.adaptive ? Math.min(quality.px, quality.max) : quality.max;
+  if (px !== quality.px) setRenderScale(px);
+  // anti-aliasing: multisampling on the post-processing targets
+  if (composer.renderTarget1.samples !== s.aa) {
+    for (const rt of [composer.renderTarget1, composer.renderTarget2]) { rt.samples = s.aa; rt.dispose(); }
+    composer.setSize(innerWidth, innerHeight);
+  }
+  bloom.enabled = s.bloom;
+  lensPass.enabled = s.lens;
+  skyScale = s.sky;
+  glassScale = s.glass === 'reduced' ? 0.5 : 1;
+  backdropEvery = s.glass === 'reduced' ? 3 : 2;
+  resizeTargets();
+  dustPoints.visible = sparks.visible = s.particles;
+  fpsEl.hidden = !s.fps;
+}
+
+function saveSettings() {
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch { /* storage blocked */ }
+}
+
+const el = (tag, cls, text) => {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+};
+
+function segmented(options, current, onPick) {
+  const wrap = el('div', 'seg');
+  for (const [value, label] of options) {
+    const b = el('button', value === current ? 'on' : '', label);
+    b.type = 'button';
+    b.addEventListener('click', () => onPick(value));
+    wrap.appendChild(b);
+  }
+  return wrap;
+}
+
+function renderSettings() {
+  const card = settingsEl.querySelector('.card');
+  card.replaceChildren();
+  const head = el('div', 'head');
+  head.append(el('h2', '', 'Settings'));
+  const close = el('button', 'x', '✕');
+  close.type = 'button';
+  close.setAttribute('aria-label', 'Close settings');
+  close.addEventListener('click', closeSettings);
+  head.append(close);
+  card.append(head);
+
+  card.append(el('h3', '', 'Quality'));
+  const presets = [['auto', 'Auto'], ['high', 'High'], ['medium', 'Medium'], ['low', 'Low']];
+  const q = settings.quality;
+  card.append(segmented(presets, q, (name) => {
+    Object.assign(settings, PRESETS[name], { quality: name });
+    changed();
+  }));
+  card.append(el('p', 'note', PRESET_NOTES[q] ?? PRESET_NOTES.custom));
+
+  const section = (title, rows, custom) => {
+    card.append(el('h3', '', title));
+    for (const row of rows) {
+      const r = el('div', 'row');
+      const label = el('div', 'label', row.label);
+      if (row.hint) label.append(el('small', '', row.hint));
+      r.append(label, segmented(row.options, settings[row.key], (value) => {
+        settings[row.key] = value;
+        if (custom) settings.quality = matchPreset();
+        changed();
+      }));
+      card.append(r);
+    }
+  };
+  section('Advanced', ADVANCED, true);
+  section('Comfort and info', COMFORT, false);
+
+  const reset = el('button', 'reset', 'Reset to defaults');
+  reset.type = 'button';
+  reset.addEventListener('click', () => { Object.assign(settings, DEFAULTS); changed(); });
+  card.append(reset);
+}
+
+function changed() {
+  saveSettings();
+  applySettings();
+  renderSettings();
+}
+
+function openSettings() { closeControls(); renderSettings(); settingsEl.classList.add('open'); }
+function closeSettings() { settingsEl.classList.remove('open'); }
+gearBtn.addEventListener('click', () => (settingsEl.classList.contains('open') ? closeSettings() : openSettings()));
+settingsEl.addEventListener('click', (e) => { if (e.target === settingsEl) closeSettings(); });
+addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && settingsEl.classList.contains('open')) { closeSettings(); e.stopImmediatePropagation(); }
+}, true);
+
+// frame-rate readout (and the render scale it is running at)
+let fpsEma = 60, fpsShown = 0;
+function fpsStep(frameSecs, now) {
+  if (settings.fps && frameSecs > 0 && frameSecs < 0.5) {
+    fpsEma += (1 / frameSecs - fpsEma) * 0.1;
+    if (now - fpsShown > 0.4) { fpsShown = now; fpsEl.textContent = `${Math.round(fpsEma)} fps · ${+quality.px.toFixed(2)}×`; }
+  }
+}
+
+applySettings();
+
+// ---------- Controls panel ----------
+// The reference for every input, kept out of the way until you want it.
+const controlsEl = document.getElementById('controls');
+const CONTROLS = [
+  { title: 'Mouse', rows: [
+    ['Left-drag', 'Orbit around what you are looking at'],
+    ['Right-drag', 'Pan sideways and up or down'],
+    ['Left + right drag', 'Zoom toward the panel under the pointer (categories) · fly forward and back (graph) · zoom (open note). Drag up to go in.'],
+    ['Middle-drag', 'Roll the view around your line of sight. It levels itself when you let go.'],
+    ['Scroll', 'Fly through the categories · zoom in the graph · scroll an open page (turn pages in page view)'],
+    ['Shift + scroll', 'Zoom, in the category view'],
+    ['Click a panel', 'Open it. Click empty space to go back.'],
+    ['Click a video thumbnail', 'Play the video'],
+    ['Scroll over the mini graph', "Zoom into the open note's related notes; click it to see them on their own screen"],
+  ] },
+  { title: 'Keyboard', rows: [
+    ['← →', 'Previous or next category (also Home and End)'],
+    ['Esc', 'Go back, or close a window'],
+    ['P', 'Switch an open note between scrolling and page view'],
+    ['← → Space', 'Turn pages in page view; ↑ ↓ and Page keys scroll'],
+    ['T', 'Switch theme'],
+  ] },
+];
+function renderControls() {
+  const card = controlsEl.querySelector('.card');
+  card.replaceChildren();
+  const head = el('div', 'head');
+  head.append(el('h2', '', 'Controls'));
+  const close = el('button', 'x', '✕');
+  close.type = 'button';
+  close.setAttribute('aria-label', 'Close controls');
+  close.addEventListener('click', closeControls);
+  head.append(close);
+  card.append(head);
+  for (const group of CONTROLS) {
+    card.append(el('h3', '', group.title));
+    for (const [keys, what] of group.rows) {
+      const r = el('div', 'row help');
+      const k = el('div', 'keys');
+      keys.split(' · ').forEach((part) => k.append(el('kbd', '', part)));
+      r.append(k, el('div', 'what', what));
+      card.append(r);
+    }
+  }
+}
+function openControls() { closeSettings(); renderControls(); controlsEl.classList.add('open'); }
+function closeControls() { controlsEl.classList.remove('open'); }
+document.getElementById('help').addEventListener('click', () => (controlsEl.classList.contains('open') ? closeControls() : openControls()));
+controlsEl.addEventListener('click', (e) => { if (e.target === controlsEl) closeControls(); });
+addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && controlsEl.classList.contains('open')) { closeControls(); e.stopImmediatePropagation(); }
+}, true);
 
 addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
@@ -2823,7 +3046,6 @@ for (const n of nodes) {
 
 const graphPos = new Map(nodes.map((n) => [n, n.pos.clone()])); // the force-directed positions
 const CELL_W = PANEL_W * 1.3, CELL_H = PANEL_H * 1.22, RAIL_DEPTH = 10; // walls are stacked this far apart in depth
-const railHint = '<b>Scroll</b> fly through categories &nbsp;·&nbsp; <b>Left+right drag</b> zoom to the panel under the pointer &nbsp;·&nbsp; <b>Left-drag</b> orbit &nbsp;·&nbsp; <b>Right-drag</b> pan &nbsp;·&nbsp; <b>Middle-drag</b> roll &nbsp;·&nbsp; <b>Click</b> a panel to open';
 const groups = [];
 const RAIL_DIR = new THREE.Vector3(0.05, 0.04, 1).normalize(); // nearly front-on, so a flat wall keeps even column sizes
 const RAIL_LOOK = new THREE.Vector3(0, 1.0, 0); // focus a little above the wall's middle so its title fits in view too
@@ -2852,7 +3074,7 @@ const RAIL_LOOK = new THREE.Vector3(0, 1.0, 0); // focus a little above the wall
     const cols = list.length <= 1 ? 1 : Math.min(list.length, THREE.MathUtils.clamp(Math.round(Math.sqrt(list.length * (innerWidth / innerHeight) * (CELL_H / CELL_W) * 0.8)), 2, 5));
     const rows = Math.ceil(list.length / cols);
     const W = cols * CELL_W, H = rows * CELL_H;
-    const g = { key, label: key.charAt(0).toUpperCase() + key.slice(1), nodes: list, cols, rows, W, H, lat: W * 1.3 + 2.5, off: 0 }; // lat: how far to the side the wall floats while it is still ahead of you
+    const g = { key, label: list.find((n) => n.tags.includes('section'))?.title ?? key.charAt(0).toUpperCase() + key.slice(1), nodes: list, cols, rows, W, H, lat: W * 1.3 + 2.5, off: 0 }; // lat: how far to the side the wall floats while it is still ahead of you
     // each wall sits deeper than the last, nudged around a small spiral so the next one peeks out from behind the current
     const k = groups.length;
     g.c = new THREE.Vector3(Math.sin(k * 1.9) * 2.4, Math.cos(k * 1.9) * 1.3, -k * RAIL_DEPTH);
@@ -2875,7 +3097,7 @@ function drawRailLabel(g) {
   ctx.clearRect(0, 0, c.width, c.height);
   const col = new THREE.Color().setHSL(hueOf(g.nodes[0]), 0.75, 0.68).getStyle();
   ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.shadowColor = col; ctx.shadowBlur = 36;
+  ctx.shadowColor = col; ctx.shadowBlur = 14;
   ctx.fillStyle = '#fff';
   ctx.font = `700 120px ${FONT}`;
   ctx.fillText(g.label, 512, 105);
@@ -2888,7 +3110,7 @@ function drawRailLabel(g) {
   return c;
 }
 for (const g of groups) {
-  g.sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(drawRailLabel(g)), transparent: true, depthWrite: false, fog: false, opacity: 0 }));
+  g.sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(drawRailLabel(g)), transparent: true, depthWrite: false, fog: false, opacity: 0, color: 0xdcdcdc })); // tinted just under the bloom threshold, so the title stays crisp instead of blooming into a blob
   g.sprite.scale.set(8, 2, 1);
   g.sprite.position.set(g.c.x, g.c.y + g.H / 2 + 1.5, g.c.z);
   g.sprite.renderOrder = 4;
@@ -3124,7 +3346,6 @@ addEventListener('blur', () => { mouse.roll = false; rollGoal = 0; if (mouse.cho
 // Starting view: the first wall in rail mode
 if (layoutMode === 'rail') {
   controls.autoRotate = false;
-  setHint(railHint);
   edgeVisGoal.fill(0.06);
   edgeVis.set(edgeVisGoal);
   controls.target.copy(railTarget());
@@ -3204,6 +3425,7 @@ renderer.setAnimationLoop(() => {
   const dt = Math.min(0.05, frameSecs);
   lastT = t;
   adaptQuality(frameSecs, t);
+  fpsStep(frameSecs, t);
   timeUniform.value = t;
   stepTheme(dt);
 
@@ -3250,6 +3472,7 @@ renderer.setAnimationLoop(() => {
     camera.position.copy(controls.target).addScaledVector(zoomDir, zoomCur);
     if (Math.abs(zoomCur - zoomGoal) < 0.004) zoomActive = false;
   }
+  if (settings.reduceMotion) controls.autoRotate = false;
   roll = dampTo(roll, rollV, rollGoal, mouse.roll ? 18 : 4, dt); // levels itself again after a roll
   rollV = dampV;
   controls.update();
@@ -3275,7 +3498,7 @@ renderer.setAnimationLoop(() => {
       n.cur.y = dampTo(n.cur.y, n.vel.y, n.goal.y, 6, dt); n.vel.y = dampV;
       n.cur.z = dampTo(n.cur.z, n.vel.z, n.goal.z, 6, dt); n.vel.z = dampV;
     }
-    const bob = n === selected ? 1 - (mini.zoomE || 0) : 1; // the open page stops floating while you read its mini graph
+    const bob = settings.reduceMotion ? 0 : n === selected ? 1 - (mini.zoomE || 0) : 1; // the open page stops floating while you read its mini graph
     m.position.set(n.cur.x + n.group.off, n.cur.y + Math.sin(t * 0.8 + n.index) * 0.06 * bob, n.cur.z);
     let og = n.opacityGoal, sg = n.scaleGoal * (n === hovered && n !== selected ? 1.12 : 1), hv = n === hovered ? 1 : 0;
     if (miniFocus > 0.01 && n !== selected) {
@@ -3475,7 +3698,7 @@ renderer.setAnimationLoop(() => {
   renderer.setRenderTarget(null);
 
   if (selected?.detailed && paperShow < 0.98) { // blurred copy of everything behind the glass page: it is heavily blurred and slow-moving, so every other frame is enough
-    if (backdropOwner !== selected || (backdropTick++ & 1) === 0) { renderBackdrop(selected); backdropOwner = selected; }
+    if (backdropOwner !== selected || (backdropTick++ % backdropEvery) === 0) { renderBackdrop(selected); backdropOwner = selected; }
   }
   // VFX decay, then the whole frame goes through bloom + the lens pass
   warp *= Math.exp(-dt * 3.2);
