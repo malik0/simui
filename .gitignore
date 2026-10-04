@@ -29,3 +29,7 @@ Thumbs.db
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# SHARP experiment (venv, model weights, outputs)
+.sharp/
+experiments/splats/

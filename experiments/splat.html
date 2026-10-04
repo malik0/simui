@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SHARP splat test</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #05060f; color: #e8ecff; font: 13px/1.4 system-ui, sans-serif; overflow: hidden; }
+      canvas { display: block; }
+      #bar { position: fixed; top: 12px; left: 12px; display: flex; gap: 6px; flex-wrap: wrap; z-index: 2; max-width: 70vw; }
+      #bar button { font: inherit; cursor: pointer; color: inherit; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 999px; padding: 6px 12px; }
+      #bar button.on { background: rgba(110, 130, 255, 0.5); }
+      #info { position: fixed; left: 12px; bottom: 12px; z-index: 2; background: rgba(0,0,0,0.45); padding: 8px 12px; border-radius: 10px; white-space: pre; }
+      #flat { position: fixed; right: 12px; top: 12px; width: 280px; border-radius: 8px; z-index: 2; opacity: 0.9; }
+    </style>
+  </head>
+  <body>
+    <div id="bar"></div>
+    <img id="flat" alt="original photo" />
+    <div id="info">loading…</div>
+    <script type="module" src="./splat.js"></script>
+  </body>
+</html>
